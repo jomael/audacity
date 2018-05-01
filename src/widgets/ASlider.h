@@ -24,6 +24,7 @@
 
 #if wxUSE_ACCESSIBILITY
 #include <wx/access.h>
+#include "WindowAccessible.h"
 #endif
 
 class wxBitmap;
@@ -165,7 +166,7 @@ class LWSlider
    void FormatPopWin();
    void SetPopWinPosition();
    void CreatePopWin();
-   void Draw(wxDC & dc);
+   void DrawToBitmap(wxDC & dc);
 
    bool DoShowDialog(wxPoint pos);
 
@@ -244,16 +245,35 @@ class ASlider /* not final */ : public wxPanel
    friend class ASliderAx;
 
  public:
+   struct Options {
+      Options() {}
+
+      int style{ FRAC_SLIDER };
+      wxOrientation orientation{ wxHORIZONTAL };
+      bool popup{ true };
+      bool canUseShift{ true };
+      float stepValue{ STEP_CONTINUOUS };
+
+      float line{ 1.0 };
+      float page{ 5.0 };
+
+      Options& Style( int s ) { style = s; return *this; }
+      Options& Orientation( wxOrientation o )
+         { orientation = o; return *this; }
+      Options& Popup( bool p ) { popup = p; return *this; }
+      Options& CanUseShift( bool c ) { canUseShift = c; return *this; }
+      Options& StepValue( float v ) { stepValue = v; return *this; }
+
+      Options& Line( float l ) { line = l; return *this; }
+      Options& Page( float p ) { page = p; return *this; }
+   };
+
    ASlider( wxWindow * parent,
             wxWindowID id,
             const wxString &name,
             const wxPoint & pos,
             const wxSize & size,
-            int style = FRAC_SLIDER,
-            bool popup = true,
-            bool canUseShift = true,
-            float stepValue = STEP_CONTINUOUS,
-            int orientation = wxHORIZONTAL);
+            const Options &options = Options{});
    virtual ~ASlider();
 
    bool AcceptsFocus() const override { return s_AcceptsFocus; }
@@ -287,7 +307,7 @@ class ASlider /* not final */ : public wxPanel
    void OnTimer(wxTimerEvent & event);
 
    // Overrides of the wxWindow functions with the same semantics
-   bool Enable(bool enable = true);
+   bool Enable(bool enable = true) override;
    bool IsEnabled() const;
 
 private:
@@ -338,6 +358,7 @@ class SliderDialog final : public wxDialogWrapper
    bool TransferDataFromWindow() override;
 
    void OnSlider(wxCommandEvent &event);
+   void OnTextChange(wxCommandEvent &event);  
 
    ASlider * mSlider;
    wxTextCtrl * mTextCtrl;
@@ -350,7 +371,7 @@ class SliderDialog final : public wxDialogWrapper
 
 #if wxUSE_ACCESSIBILITY
 
-class ASliderAx final : public wxWindowAccessible
+class ASliderAx final : public WindowAccessible
 {
 public:
    ASliderAx(wxWindow * window);

@@ -9,6 +9,9 @@ Paul Licameli split from TrackPanel.cpp
 **********************************************************************/
 
 #include "../../../../Audacity.h"
+
+#ifdef USE_MIDI
+
 #include "NoteTrackVZoomHandle.h"
 #include "../../../../Experimental.h"
 #include "NoteTrackVRulerControls.h"
@@ -50,8 +53,7 @@ namespace
 
 NoteTrackVZoomHandle::NoteTrackVZoomHandle
 (const std::shared_ptr<NoteTrack> &pTrack, const wxRect &rect, int y)
-   : mZoomStart(y), mZoomEnd(y), mRect(rect)
-   , mpTrack{ pTrack }
+   : mpTrack{ pTrack } , mZoomStart(y), mZoomEnd(y), mRect(rect)
 {
 }
 
@@ -192,7 +194,7 @@ private:
       mpData = nullptr;
    }
 
-   virtual void InitMenu(Menu *pMenu, void *pUserData);
+   virtual void InitMenu(Menu *pMenu, void *pUserData) override;
 
    void OnWaveformScaleType(wxCommandEvent &evt);
 };
@@ -332,3 +334,5 @@ void NoteTrackVZoomHandle::DrawExtras
       TrackVRulerControls::DrawZooming
          ( dc, mRect, panelRect, mZoomStart, mZoomEnd );
 }
+
+#endif

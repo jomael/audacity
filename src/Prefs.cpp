@@ -68,8 +68,9 @@
 #include "widgets/ErrorDialog.h"
 #include "Internat.h"
 
-std::unique_ptr<wxFileConfig> ugPrefs {};
-wxFileConfig *gPrefs = NULL;
+std::unique_ptr<AudacityPrefs> ugPrefs {};
+
+AudacityPrefs *gPrefs = NULL;
 int gMenusDirty = 0;
 
 #if 0
@@ -133,13 +134,45 @@ static void CopyEntriesRecursive(wxString path, wxConfigBase *src, wxConfigBase 
 }
 #endif
 
+AudacityPrefs::AudacityPrefs(const wxString& appName,
+               const wxString& vendorName,
+               const wxString& localFilename,
+               const wxString& globalFilename,
+               long style,
+               const wxMBConv& conv) :
+   wxFileConfig(appName,
+               vendorName,
+               localFilename,
+               globalFilename,
+               style,
+               conv)
+{
+}
+
+
+
+// Bug 825 is essentially that SyncLock requires EditClipsCanMove.
+// SyncLock needs rethinking, but meanwhile this function 
+// fixes the issues of Bug 825 by allowing clips to move when in 
+// SyncLock.
+bool AudacityPrefs::GetEditClipsCanMove()
+{
+   bool mIsSyncLocked;
+   gPrefs->Read(wxT("/GUI/SyncLockTracks"), &mIsSyncLocked, false);
+   if( mIsSyncLocked )
+      return true;
+   bool editClipsCanMove;
+   Read(wxT("/GUI/EditClipCanMove"), &editClipsCanMove, true);
+   return editClipsCanMove;
+}
+
 void InitPreferences()
 {
    wxString appName = wxTheApp->GetAppName();
 
    wxFileName configFileName(FileNames::DataDir(), wxT("audacity.cfg"));
 
-   ugPrefs = std::make_unique<wxFileConfig>
+   ugPrefs = std::make_unique<AudacityPrefs>
       (appName, wxEmptyString,
        configFileName.GetFullPath(),
        wxEmptyString, wxCONFIG_USE_LOCAL_FILE);
@@ -340,4 +373,91 @@ void FinishPreferences()
       ugPrefs.reset();
       gPrefs = NULL;
    }
+}
+
+//////////
+wxString EnumSetting::Read() const
+{
+   const auto &defaultValue = Default().Internal();
+   wxString value;
+   if ( !gPrefs->Read(mKey, &value, defaultValue) )
+      if (!mMigrated) {
+         const_cast<EnumSetting*>(this)->Migrate( value );
+         mMigrated = true;
+      }
+
+   // Remap to default if the string is not known -- this avoids surprises
+   // in case we try to interpret config files from future versions
+   auto index = Find( value );
+   if ( index >= mnSymbols )
+      value = defaultValue;
+   return value;
+}
+
+size_t EnumSetting::Find( const wxString &value ) const
+{
+   return size_t(
+      std::find( begin(), end(), IdentInterfaceSymbol{ value, {} } )
+         - mSymbols );
+}
+
+void EnumSetting::Migrate( wxString &value )
+{
+}
+
+bool EnumSetting::Write( const wxString &value )
+{
+   auto index = Find( value );
+   if (index >= mnSymbols)
+      return false;
+
+   auto result = gPrefs->Write( mKey, value );
+   mMigrated = true;
+   return result;
+}
+
+int EncodedEnumSetting::ReadInt() const
+{
+   if (!mIntValues)
+      return 0;
+
+   auto index = Find( Read() );
+   wxASSERT( index < mnSymbols );
+   return mIntValues[ index ];
+}
+
+size_t EncodedEnumSetting::FindInt( int code ) const
+{
+   if (!mIntValues)
+      return mnSymbols;
+
+   return size_t(
+      std::find( mIntValues, mIntValues + mnSymbols, code )
+         - mIntValues );
+}
+
+void EncodedEnumSetting::Migrate( wxString &value )
+{
+   int intValue = 0;
+   if ( !mOldKey.empty() &&
+        gPrefs->Read(mOldKey, &intValue, 0) ) {
+      // Make the migration, only once and persistently.
+      // Do not DELETE the old key -- let that be read if user downgrades
+      // Audacity.  But further changes will be stored only to the NEW key
+      // and won't be seen then.
+      auto index = FindInt( intValue );
+      if ( index >= mnSymbols )
+         index = mDefaultSymbol;
+      value = mSymbols[index].Internal();
+      Write(value);
+      gPrefs->Flush();
+   }
+}
+
+bool EncodedEnumSetting::WriteInt( int code ) // you flush gPrefs afterward
+{
+   auto index = FindInt( code );
+   if ( index >= mnSymbols )
+      return false;
+   return Write( mSymbols[index].Internal() );
 }

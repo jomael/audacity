@@ -42,6 +42,7 @@
 #include "../Prefs.h"
 #include "../Internat.h"
 #include "../Tags.h"
+#include "../prefs/QualityPrefs.h"
 
 
 #define DESC _("Ogg Vorbis files")
@@ -91,8 +92,8 @@ public:
 
    ~OggImportPlugin() { }
 
-   wxString GetPluginStringID() { return wxT("liboggvorbis"); }
-   wxString GetPluginFormatDescription();
+   wxString GetPluginStringID() override { return wxT("liboggvorbis"); }
+   wxString GetPluginFormatDescription() override;
    std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
 };
 
@@ -108,8 +109,7 @@ public:
       mVorbisFile(std::move(vorbisFile))
       , mStreamUsage{ static_cast<size_t>(mVorbisFile->links) }
    {
-      mFormat = (sampleFormat)
-         gPrefs->Read(wxT("/SamplingRate/DefaultProjectSampleFormat"), floatSample);
+      mFormat = QualityPrefs::SampleFormatChoice();
 
       for (int i = 0; i < mVorbisFile->links; i++)
       {

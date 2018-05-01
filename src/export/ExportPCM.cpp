@@ -119,7 +119,7 @@ private:
    wxChoice *mEncodingChoice;
    int mHeaderFromChoice;
    int mEncodingFromChoice;
-   wxArrayInt mEncodingFormats;
+   std::vector<int> mEncodingFormats;
 
    DECLARE_EVENT_TABLE()
 };
@@ -133,7 +133,7 @@ ExportPCMOptions::ExportPCMOptions(wxWindow *parent, int selformat)
 {
    int format;
 
-   if (selformat < 0 || selformat >= WXSIZEOF(kFormats))
+   if (selformat < 0 || static_cast<unsigned int>(selformat) >= WXSIZEOF(kFormats))
    {
       format = ReadExportFormatPref();
    }
@@ -157,7 +157,7 @@ ExportPCMOptions::ExportPCMOptions(wxWindow *parent, int selformat)
       if (valid)
       {
          mEncodingNames.Add(sf_encoding_index_name(i));
-         mEncodingFormats.Add(enc);
+         mEncodingFormats.push_back(enc);
          if ((format & SF_FORMAT_SUBMASK) == (int)sf_encoding_index_to_subtype(i))
             mEncodingFromChoice = sel;
          else
@@ -234,17 +234,17 @@ void ExportPCMOptions::OnHeaderChoice(wxCommandEvent & WXUNUSED(evt))
 
    mEncodingNames.Clear();
    mEncodingChoice->Clear();
-   mEncodingFormats.Clear();
+   mEncodingFormats.clear();
    int sel = wxNOT_FOUND;
    int i,j;
 
    int sfnum = sf_num_simple_formats();
-   wxArrayInt sfs;
+   std::vector<int> sfs;
 
    for (i = 0; i < sfnum; i++)
    {
       SF_FORMAT_INFO *fi = sf_simple_format(i);
-      sfs.Add(fi->format);
+      sfs.push_back(fi->format);
    }
 
    int num = sf_num_encodings();
@@ -258,13 +258,13 @@ void ExportPCMOptions::OnHeaderChoice(wxCommandEvent & WXUNUSED(evt))
          const auto name = sf_encoding_index_name(i);
          mEncodingNames.Add(name);
          mEncodingChoice->Append(name);
-         mEncodingFormats.Add(enc);
+         mEncodingFormats.push_back(enc);
          for (j = 0; j < sfnum; j++)
          {
             int enc = sfs[j];
             if ((sel == wxNOT_FOUND) && (fmt == enc))
             {
-               sel = mEncodingFormats.GetCount()-1;
+               sel = mEncodingFormats.size() - 1;
                break;
             }
          }
@@ -329,7 +329,7 @@ public:
                const Tags *metadata = NULL,
                int subformat = 0) override;
    // optional
-   wxString GetExtension(int index);
+   wxString GetExtension(int index) override;
    bool CheckFileName(wxFileName &filename, int format) override;
 
 private:
@@ -405,7 +405,7 @@ ProgressResult ExportPCM::Export(AudacityProject *project,
    const TrackList   *tracks = project->GetTracks();
    int sf_format;
 
-   if (subformat < 0 || subformat >= WXSIZEOF(kFormats))
+   if (subformat < 0 || static_cast<unsigned int>(subformat) >= WXSIZEOF(kFormats))
    {
       sf_format = ReadExportFormatPref();
    }
@@ -501,7 +501,7 @@ ProgressResult ExportPCM::Export(AudacityProject *project,
 
          while (updateResult == ProgressResult::Success) {
             sf_count_t samplesWritten;
-            auto numSamples = mixer->Process(maxBlockLen);
+            size_t numSamples = mixer->Process(maxBlockLen);
 
             if (numSamples == 0)
                break;
@@ -513,7 +513,7 @@ ProgressResult ExportPCM::Export(AudacityProject *project,
             else
                samplesWritten = SFCall<sf_count_t>(sf_writef_float, sf.get(), (float *)mixed, numSamples);
 
-            if (samplesWritten != numSamples) {
+            if (static_cast<size_t>(samplesWritten) != numSamples) {
                char buffer2[1000];
                sf_error_str(sf.get(), buffer2, 1000);
                AudacityMessageBox(wxString::Format(
@@ -871,7 +871,7 @@ wxWindow *ExportPCM::OptionsCreate(wxWindow *parent, int format)
 {
    wxASSERT(parent); // to justify safenew
    // default, full user control
-   if (format < 0 || format >= WXSIZEOF(kFormats))
+   if (format < 0 || static_cast<unsigned int>(format) >= WXSIZEOF(kFormats))
    {
       return safenew ExportPCMOptions(parent, format);
    }

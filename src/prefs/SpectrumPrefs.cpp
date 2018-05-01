@@ -33,8 +33,8 @@
 #include "../Experimental.h"
 #include "../widgets/ErrorDialog.h"
 
-SpectrumPrefs::SpectrumPrefs(wxWindow * parent, WaveTrack *wt)
-:  PrefsPanel(parent, wt ? _("Spectrogram Settings") : _("Spectrograms"))
+SpectrumPrefs::SpectrumPrefs(wxWindow * parent, wxWindowID winid, WaveTrack *wt)
+:  PrefsPanel(parent, winid, wt ? _("Spectrogram Settings") : _("Spectrograms"))
 , mWt(wt)
 , mPopulating(false)
 {
@@ -171,54 +171,60 @@ void SpectrumPrefs::PopulateOrExchange(ShuttleGui & S)
       mDefaultsCheckbox = S.Id(ID_DEFAULTS).TieCheckBox(_("&Use Preferences"), mDefaulted);
    }
 
-   S.StartStatic(_("Scale"));
+   S.StartMultiColumn(2,wxEXPAND);
    {
-      S.StartTwoColumn();
+      S.SetStretchyCol( 0 );
+      S.SetStretchyCol( 1 );
+      S.StartStatic(_("Scale"),1);
       {
-         S.Id(ID_SCALE).TieChoice(_("S&cale") + wxString(wxT(":")),
-            *(int*)&mTempSettings.scaleType,
-            &mScaleChoices);
-
-         mMinFreq =
-            S.Id(ID_MINIMUM).TieNumericTextBox(_("Mi&nimum Frequency (Hz):"),
-            mTempSettings.minFreq,
-            12);
-
-         mMaxFreq =
-            S.Id(ID_MAXIMUM).TieNumericTextBox(_("Ma&ximum Frequency (Hz):"),
-            mTempSettings.maxFreq,
-            12);
+         S.StartMultiColumn(2,wxEXPAND);
+         {
+            S.SetStretchyCol( 0 );
+            S.SetStretchyCol( 1 );
+            S.Id(ID_SCALE).TieChoice(_("S&cale") + wxString(wxT(":")),
+               mTempSettings.scaleType,
+               &mScaleChoices);
+            mMinFreq =
+               S.Id(ID_MINIMUM).TieNumericTextBox(_("Mi&n Frequency (Hz):"),
+               mTempSettings.minFreq,
+               12);
+            mMaxFreq =
+               S.Id(ID_MAXIMUM).TieNumericTextBox(_("Ma&x Frequency (Hz):"),
+               mTempSettings.maxFreq,
+               12);
+         }
+         S.EndMultiColumn();
       }
-      S.EndTwoColumn();
-   }
-   S.EndStatic();
+      S.EndStatic();
 
-   S.StartStatic(_("Colors"));
-   {
-      S.StartTwoColumn();
+      S.StartStatic(_("Colors"),1);
       {
-         mGain =
-            S.Id(ID_GAIN).TieNumericTextBox(_("&Gain (dB):"),
-            mTempSettings.gain,
-            8);
+         S.StartMultiColumn(2,wxEXPAND);
+         {
+            S.SetStretchyCol( 0 );
+            S.SetStretchyCol( 1 );
+            mGain =
+               S.Id(ID_GAIN).TieNumericTextBox(_("&Gain (dB):"),
+               mTempSettings.gain,
+               8);
+            mRange =
+               S.Id(ID_RANGE).TieNumericTextBox(_("&Range (dB):"),
+               mTempSettings.range,
+               8);
 
-         mRange =
-            S.Id(ID_RANGE).TieNumericTextBox(_("&Range (dB):"),
-            mTempSettings.range,
-            8);
+            mFrequencyGain =
+               S.Id(ID_FREQUENCY_GAIN).TieNumericTextBox(_("High &boost (dB/dec):"),
+               mTempSettings.frequencyGain,
+               8);
+         }
+         S.EndMultiColumn();
 
-         mFrequencyGain =
-            S.Id(ID_FREQUENCY_GAIN).TieNumericTextBox(_("Frequency g&ain (dB/dec):"),
-            mTempSettings.frequencyGain,
-            4);
+         S.Id(ID_GRAYSCALE).TieCheckBox(_("Gra&yscale"),
+            mTempSettings.isGrayscale);
       }
-
-      S.Id(ID_GRAYSCALE).TieCheckBox(_("Gra&yscale"),
-         mTempSettings.isGrayscale);
-
-      S.EndTwoColumn();
+      S.EndStatic();
    }
-   S.EndStatic();
+   S.EndMultiColumn();
 
    S.StartStatic(_("Algorithm"));
    {
@@ -226,25 +232,22 @@ void SpectrumPrefs::PopulateOrExchange(ShuttleGui & S)
       {
          mAlgorithmChoice =
             S.Id(ID_ALGORITHM).TieChoice(_("A&lgorithm") + wxString(wxT(":")),
-            *(int*)&mTempSettings.algorithm,
+            mTempSettings.algorithm,
             &mAlgorithmChoices);
 
          S.Id(ID_WINDOW_SIZE).TieChoice(_("Window &size:"),
             mTempSettings.windowSize,
             &mSizeChoices);
-         S.SetSizeHints(mSizeChoices);
 
          S.Id(ID_WINDOW_TYPE).TieChoice(_("Window &type:"),
             mTempSettings.windowType,
             &mTypeChoices);
-         S.SetSizeHints(mTypeChoices);
 
 #ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
          mZeroPaddingChoiceCtrl =
             S.Id(ID_PADDING_SIZE).TieChoice(_("&Zero padding factor") + wxString(wxT(":")),
             mTempSettings.zeroPaddingFactor,
             &mZeroPaddingChoices);
-         S.SetSizeHints(mZeroPaddingChoices);
 #endif
       }
       S.EndMultiColumn();
@@ -300,7 +303,9 @@ void SpectrumPrefs::PopulateOrExchange(ShuttleGui & S)
 
    } S.EndScroller();
    
-   EnableDisableSTFTOnlyControls();
+   // Enabling and disabling belongs outside this function.
+   if( S.GetMode() != eIsGettingMetadata )
+      EnableDisableSTFTOnlyControls();
 
    mPopulating = false;
 }
@@ -585,8 +590,8 @@ SpectrumPrefsFactory::SpectrumPrefsFactory(WaveTrack *wt)
 {
 }
 
-PrefsPanel *SpectrumPrefsFactory::Create(wxWindow *parent)
+PrefsPanel *SpectrumPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
-   return safenew SpectrumPrefs(parent, mWt);
+   return safenew SpectrumPrefs(parent, winid, mWt);
 }

@@ -34,6 +34,7 @@ and sample size to help you importing data of an unknown format.
 #include "../ShuttleGui.h"
 #include "../UserException.h"
 #include "../WaveTrack.h"
+#include "../prefs/QualityPrefs.h"
 
 #include <cmath>
 #include <cstdio>
@@ -193,8 +194,7 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
       // the quality of the original file.
       //
 
-      format = (sampleFormat)
-      gPrefs->Read(wxT("/SamplingRate/DefaultProjectSampleFormat"), floatSample);
+      format = QualityPrefs::SampleFormatChoice();
 
       if (format != floatSample &&
           sf_subtype_more_than_16_bits(encoding))
@@ -490,8 +490,9 @@ void ImportRawDialog::OnOK(wxCommandEvent & WXUNUSED(event))
       mPercent = 100.0;
    if (mRate < 100.0)
       mRate = 100.0;
-   if (mRate > 100000.0)
-      mRate = 100000.0;
+   // Highest preset sample rate supported in Audacity 2.3.0 is 384 kHz
+   if (mRate > 384000.0)
+      mRate = 384000.0;
 
    EndModal(true);
 }

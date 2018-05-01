@@ -16,18 +16,25 @@
 #include <wx/string.h>
 #include <wx/longlong.h>
 
+#include <algorithm>
+
 #ifndef IN_RC
+#include "Audacity.h"
 
 class wxString;
 
-extern const wxString& GetCustomTranslation(const wxString& str1 );
-extern const wxString& GetCustomSubstitution(const wxString& str1 );
+extern AUDACITY_DLL_API const wxString& GetCustomTranslation(const wxString& str1 );
+extern AUDACITY_DLL_API const wxString& GetCustomSubstitution(const wxString& str1 );
 
 // Marks string for substitution only.
 #define _TS( s ) GetCustomSubstitution( s )
 
 // Marks strings for extraction only...must use wxGetTranslation() to translate.
 #define XO(s)  wxT(s)
+
+#ifdef _
+   #undef _
+#endif
 
 #if defined( __WXDEBUG__ )
    // Force a crash if you misuse _ in a static initializer, so that translation
@@ -50,6 +57,11 @@ extern const wxString& GetCustomSubstitution(const wxString& str1 );
 #else
    #define _(s) GetCustomTranslation((s))
 #endif
+
+#ifdef wxPLURAL
+   #undef wxPLURAL
+#endif
+
 
 // The two string arugments will go to the .pot file, as
 // msgid sing
@@ -166,5 +178,47 @@ private:
 // Convert C strings to wxString
 #define UTF8CTOWX(X) wxString((X), wxConvUTF8)
 #define LAT1CTOWX(X) wxString((X), wxConvISO8859_1)
+
+class IdentInterfaceSymbol;
+wxArrayString LocalizedStrings(
+   const IdentInterfaceSymbol strings[], size_t nStrings);
+
+// This object pairs an internal string, maybe empty, with a translated string.
+// Any internal string may be written to configuration or other files and,
+// for compatibility, should not vary between Audacity versions.
+// The translated string may be shown to users and may vary with locale, and
+// Audacity version if it is decided to use a different user-visible message.
+// Sometimes the translated string is derived from a msgid identical
+// to the internal string.  The translated string is not meant to persist.
+class TranslatedInternalString
+{
+public:
+
+   TranslatedInternalString() = default;
+
+   // One-argument constructor from a msgid
+   explicit TranslatedInternalString( const wxString &internal )
+   : mInternal{ internal }, mTranslated{ GetCustomTranslation( internal ) }
+   {}
+
+   // Two-argument version, when translated does not derive from internal
+   TranslatedInternalString( const wxString &internal,
+                             const wxString &translated )
+   : mInternal{ internal }, mTranslated{ translated }
+   {}
+
+   const wxString &Internal() const { return mInternal; }
+   const wxString Translated() const 
+   {  
+      wxString Temp = mTranslated;
+      Temp.Replace( "&","" );
+      return Temp;
+   }
+   const wxString &TranslatedForMenu() const { return mTranslated; }
+
+private:
+   wxString mInternal;
+   wxString mTranslated;
+};
 
 #endif

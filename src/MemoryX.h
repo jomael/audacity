@@ -3,6 +3,7 @@
 
 // C++ standard header <memory> with a few extensions
 #include <memory>
+#include <cstdlib> // Needed for free.
 #ifndef safenew
 #define safenew new
 #endif
@@ -11,6 +12,20 @@
 // std:: containers knowing about rvalue references
 #undef __AUDACITY_OLD_STD__
 
+
+// JKC:
+// This is completely the wrong way to test for new stdlib (supporting std::hash etc)
+// We should instead use configure checks or test if __cplusplus is bigger that some value.
+//
+// On the other hand, as we are moving to wxWidgets 3.1.1, macOSX 10.7+ is required.
+// And we could just assume/require building with C++11 and remove the body of this
+// ifdef - i.e. no longer support those workarounds.
+//
+// Macports have provided some really useful information about possibilities for
+// building with newer compilers and older SDKs.  So the option of building with old
+// compilers and old SDKs may not be needed at all, making the shift to requiring
+// C++11 have little to no downside.  So as of 13th April 2018 the code in this
+// ifdef's days are numbered.
 #if defined(__MAC_OS_X_VERSION_MIN_REQUIRED) && __MAC_OS_X_VERSION_MIN_REQUIRED <= __MAC_10_6
 
 #define __AUDACITY_OLD_STD__
@@ -39,6 +54,8 @@ using std::isinf;
 // To define unordered_map and hash
 #include <tr1/unordered_map>
 
+#include <tr1/tuple>
+
 namespace std {
    using std::tr1::unordered_set;
    using std::tr1::hash;
@@ -53,6 +70,8 @@ namespace std {
    using std::tr1::add_const;
    using std::tr1::add_pointer;
    using std::tr1::remove_pointer;
+   using std::tr1::tuple;
+   using std::tr1::get;
 
    template<typename T> struct add_rvalue_reference {
       using type = T&&;
@@ -478,7 +497,8 @@ public:
       reinit(count, initialize);
    }
 
-   ArrayOf(const ArrayOf&) PROHIBITED;
+   //ArrayOf(const ArrayOf&) PROHIBITED;
+   ArrayOf(const ArrayOf&) = delete;
    ArrayOf(ArrayOf&& that)
       : std::unique_ptr < X[] >
          (std::move((std::unique_ptr < X[] >&)(that)))
@@ -536,7 +556,8 @@ public:
          (*this)[ii] = ArrayOf<X>{ M, initialize };
    }
 
-   ArraysOf(const ArraysOf&) PROHIBITED;
+   //ArraysOf(const ArraysOf&) PROHIBITED;
+   ArraysOf(const ArraysOf&) =delete;
    ArraysOf& operator= (ArraysOf&& that)
    {
       ArrayOf<ArrayOf<X>>::operator=(std::move(that));
@@ -1171,6 +1192,7 @@ namespace std
    namespace tr1
    {
 #endif
+#if !wxCHECK_VERSION(3, 1, 0)
       template<typename T> struct hash;
       template<> struct hash< wxString > {
          size_t operator () (const wxString &str) const // noexcept
@@ -1180,6 +1202,7 @@ namespace std
             return Hasher{}( stdstr );
          }
       };
+#endif
 #ifdef __AUDACITY_OLD_STD__
    }
 #endif

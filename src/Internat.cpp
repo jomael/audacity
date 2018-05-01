@@ -31,6 +31,7 @@ and on Mac OS X for the filesystem.
 #include "FileNames.h"
 #include "widgets/ErrorDialog.h"
 #include "Internat.h"
+#include "../include/audacity/IdentInterface.h"
 
 // in order for the static member variables to exist, they must appear here
 // (_outside_) the class definition, in order to be allocated some storage.
@@ -45,7 +46,7 @@ wxCharBuffer Internat::mFilename;
 // This function allows us to replace Audacity by DarkAudacity without peppering 
 // the source code with changes.  We split out this step, the customisation, as 
 // it is used on its own (without translation) in the wxTS macro.
-const wxString& GetCustomSubstitution(const wxString& str2)
+AUDACITY_DLL_API const wxString& GetCustomSubstitution(const wxString& str2)
 {
    // If contains 'DarkAudacity, already converted.
    if( str2.Contains( "DarkAudacity" ))
@@ -63,7 +64,7 @@ const wxString& GetCustomSubstitution(const wxString& str2)
    return wxTranslations::GetUntranslatedString(str3);
 }
 #else 
-const wxString& GetCustomSubstitution(const wxString& str1)
+AUDACITY_DLL_API const wxString& GetCustomSubstitution(const wxString& str1)
 {
    return str1 ;
 }
@@ -71,7 +72,7 @@ const wxString& GetCustomSubstitution(const wxString& str1)
 
 // In any translated string, we can replace the name 'Audacity' by 'DarkAudacity'
 // without requiring translators to see extra strings for the two versions.
-const wxString& GetCustomTranslation(const wxString& str1)
+AUDACITY_DLL_API const wxString& GetCustomTranslation(const wxString& str1)
 {
    const wxString& str2 = wxGetTranslation( str1 );
    return GetCustomSubstitution( str2 );
@@ -297,4 +298,13 @@ wxString Internat::StripAccelerators(const wxString &s)
          result += s[i];
    }
    return result;
+}
+
+wxArrayString LocalizedStrings(
+   const IdentInterfaceSymbol strings[], size_t nStrings)
+{
+   wxArrayString results;
+   std::transform( strings, strings + nStrings, std::back_inserter(results),
+                   std::mem_fun_ref( &IdentInterfaceSymbol::Translation ) );
+   return results;
 }

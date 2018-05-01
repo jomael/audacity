@@ -42,10 +42,12 @@
 #include "EffectManager.h"
 
 #include "../ShuttleGui.h"
+#include "../widgets/HelpSystem.h"
 #include "../Prefs.h"
 
 #include "../WaveTrack.h"
 #include "../widgets/ErrorDialog.h"
+#include "../widgets/valnum.h"
 
 #include <algorithm>
 #include <vector>
@@ -365,7 +367,7 @@ public:
        wxWindow *parent, bool bHasProfile,
        bool bAllowTwiddleSettings);
 
-   void PopulateOrExchange(ShuttleGui & S);
+   void PopulateOrExchange(ShuttleGui & S) override;
    bool TransferDataToWindow() override;
    bool TransferDataFromWindow() override;
 
@@ -385,9 +387,10 @@ private:
 #ifdef ADVANCED_SETTINGS
    void OnMethodChoice(wxCommandEvent &);
 #endif
-   void OnPreview(wxCommandEvent &event);
+   void OnPreview(wxCommandEvent &event) override;
    void OnReduceNoise( wxCommandEvent &event );
    void OnCancel( wxCommandEvent &event );
+   void OnHelp( wxCommandEvent &event );
 
    void OnText(wxCommandEvent &event);
    void OnSlider(wxCommandEvent &event);
@@ -426,7 +429,7 @@ EffectNoiseReduction::~EffectNoiseReduction()
 
 // IdentInterface implementation
 
-wxString EffectNoiseReduction::GetSymbol()
+IdentInterfaceSymbol EffectNoiseReduction::GetSymbol()
 {
    return NOISEREDUCTION_PLUGIN_SYMBOL;
 }
@@ -436,7 +439,7 @@ wxString EffectNoiseReduction::GetDescription()
    return _("Removes background noise such as fans, tape noise, or hums");
 }
 
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 
 EffectType EffectNoiseReduction::GetType()
 {
@@ -1421,12 +1424,16 @@ struct ControlInfo {
          return wxString::Format(format, value);
    }
 
-   void CreateControls(int id, wxTextValidator &vld, ShuttleGui &S) const
+   void CreateControls(int id, ShuttleGui &S) const
    {
+      FloatingPointValidator<double> vld2(2);// precision.
+      if (formatAsInt)
+         vld2.SetPrecision( 0 );
+      vld2.SetRange( valueMin, valueMax );
       wxTextCtrl *const text =
          S.Id(id + 1).AddTextBox(textBoxCaption(), wxT(""), 0);
       S.SetStyle(wxSL_HORIZONTAL);
-      text->SetValidator(vld);
+      text->SetValidator(vld2);
 
       wxSlider *const slider =
          S.Id(id).AddSlider( {}, 0, sliderMax);
@@ -1492,6 +1499,7 @@ BEGIN_EVENT_TABLE(EffectNoiseReduction::Dialog, wxDialogWrapper)
    EVT_BUTTON(wxID_CANCEL, EffectNoiseReduction::Dialog::OnCancel)
    EVT_BUTTON(ID_EFFECT_PREVIEW, EffectNoiseReduction::Dialog::OnPreview)
    EVT_BUTTON(ID_BUTTON_GETPROFILE, EffectNoiseReduction::Dialog::OnGetProfile)
+   EVT_BUTTON(wxID_HELP, EffectNoiseReduction::Dialog::OnHelp)
 
    EVT_RADIOBUTTON(ID_RADIOBUTTON_KEEPSIGNAL, EffectNoiseReduction::Dialog::OnNoiseReductionChoice)
 #ifdef ISOLATE_CHOICE
@@ -1533,7 +1541,7 @@ EffectNoiseReduction::Dialog::Dialog
 (EffectNoiseReduction *effect,
  EffectNoiseReduction::Settings *settings,
  wxWindow *parent, bool bHasProfile, bool bAllowTwiddleSettings)
-   : EffectDialog( parent, _("Noise Reduction"), EffectTypeProcess)
+   : EffectDialog( parent, _("Noise Reduction"), EffectTypeProcess,wxDEFAULT_DIALOG_STYLE, eHelpButton )
    , m_pEffect(effect)
    , m_pSettings(settings) // point to
    , mTempSettings(*settings)  // copy
@@ -1678,6 +1686,11 @@ void EffectNoiseReduction::Dialog::OnCancel(wxCommandEvent & WXUNUSED(event))
    EndModal(0);
 }
 
+void EffectNoiseReduction::Dialog::OnHelp(wxCommandEvent & WXUNUSED(event))
+{
+   HelpSystem::ShowHelp(this, "Noise_Reduction", true);
+}
+
 void EffectNoiseReduction::Dialog::PopulateOrExchange(ShuttleGui & S)
 {
    S.StartStatic(_("Step 1"));
@@ -1697,10 +1710,9 @@ void EffectNoiseReduction::Dialog::PopulateOrExchange(ShuttleGui & S)
       S.StartMultiColumn(3, wxEXPAND);
       S.SetStretchyCol(2);
       {
-         wxTextValidator vld(wxFILTER_NUMERIC);
          for (int id = FIRST_SLIDER; id < END_OF_BASIC_SLIDERS; id += 2) {
             const ControlInfo &info = controlInfo()[(id - FIRST_SLIDER) / 2];
-            info.CreateControls(id, vld, S);
+            info.CreateControls(id, S);
          }
       }
       S.EndMultiColumn();
@@ -1798,10 +1810,9 @@ void EffectNoiseReduction::Dialog::PopulateOrExchange(ShuttleGui & S)
       S.StartMultiColumn(3, wxEXPAND);
       S.SetStretchyCol(2);
       {
-         wxTextValidator vld(wxFILTER_NUMERIC);
          for (int id = END_OF_BASIC_SLIDERS; id < END_OF_ADVANCED_SLIDERS; id += 2) {
             const ControlInfo &info = controlInfo[(id - FIRST_SLIDER) / 2];
-            info.CreateControls(id, vld, S);
+            info.CreateControls(id, S);
          }
       }
       S.EndMultiColumn();
@@ -1846,6 +1857,8 @@ bool EffectNoiseReduction::Dialog::TransferDataToWindow()
 
 bool EffectNoiseReduction::Dialog::TransferDataFromWindow()
 {
+   if( !wxWindow::Validate() )
+      return false;
    // Do the choice controls:
    if (!EffectDialog::TransferDataFromWindow())
       return false;

@@ -54,29 +54,29 @@ enum kTableType
    kLeveller,
    kRectifier,
    kHardLimiter,
-   kNumTableTypes
+   nTableTypes
 };
 
-static const wxString kTableTypeStrings[kNumTableTypes] =
+static const IdentInterfaceSymbol kTableTypeStrings[nTableTypes] =
 {
-   XO("Hard Clipping"),
-   XO("Soft Clipping"),
-   XO("Soft Overdrive"),
-   XO("Medium Overdrive"),
-   XO("Hard Overdrive"),
-   XO("Cubic Curve (odd harmonics)"),
-   XO("Even Harmonics"),
-   XO("Expand and Compress"),
-   XO("Leveller"),
-   XO("Rectifier Distortion"),
-   XO("Hard Limiter 1413")
+   { wxT("HardClipping"),               XO("Hard Clipping") },
+   { wxT("SoftClipping"),               XO("Soft Clipping") },
+   { wxT("SoftOverdrive"),              XO("Soft Overdrive") },
+   { wxT("MediumOverdrive"),            XO("Medium Overdrive") },
+   { wxT("HardOverdrive"),              XO("Hard Overdrive") },
+   { wxT("CubicCurveOddHarmonics"),     XO("Cubic Curve (odd harmonics)") },
+   { wxT("EvenHarmonics"),              XO("Even Harmonics") },
+   { wxT("ExpandCompress"),             XO("Expand and Compress") },
+   { XO("Leveller") },
+   { wxT("RectifierDistortion"),        XO("Rectifier Distortion") },
+   { wxT("HardLimiter1413"),            XO("Hard Limiter 1413") }
 };
 
 // Define keys, defaults, minimums, and maximums for the effect parameters
 // (Note: 'Repeats' is the total number of times the effect is applied.)
 //
 //     Name             Type     Key                   Def     Min      Max                 Scale
-Param( TableTypeIndx,   int,     wxT("Type"),           0,       0,      kNumTableTypes-1,    1    );
+Param( TableTypeIndx,   int,     wxT("Type"),           0,       0,      nTableTypes-1,    1    );
 Param( DCBlock,         bool,    wxT("DC Block"),      false,   false,   true,                1    );
 Param( Threshold_dB,    double,  wxT("Threshold dB"),  -6.0,  -100.0,     0.0,             1000.0f );
 Param( NoiseFloor,      double,  wxT("Noise Floor"),   -70.0,  -80.0,   -20.0,                1    );
@@ -147,9 +147,6 @@ wxString defaultLabel(int index)
    return theArray.Get()[ index ];
 }
 
-#include <wx/arrimpl.cpp>
-WX_DEFINE_OBJARRAY(EffectDistortionStateArray);
- 
 //
 // EffectDistortion
 //
@@ -171,7 +168,7 @@ END_EVENT_TABLE()
 
 EffectDistortion::EffectDistortion()
 {
-   wxASSERT(kNumTableTypes == WXSIZEOF(kTableTypeStrings));
+   wxASSERT(nTableTypes == WXSIZEOF(kTableTypeStrings));
 
    mParams.mTableChoiceIndx = DEF_TableTypeIndx;
    mParams.mDCBlock = DEF_DCBlock;
@@ -193,7 +190,7 @@ EffectDistortion::~EffectDistortion()
 
 // IdentInterface implementation
 
-wxString EffectDistortion::GetSymbol()
+IdentInterfaceSymbol EffectDistortion::GetSymbol()
 {
    return DISTORTION_PLUGIN_SYMBOL;
 }
@@ -208,7 +205,7 @@ wxString EffectDistortion::ManualPage()
    return wxT("Distortion");
 }
 
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 
 EffectType EffectDistortion::GetType()
 {
@@ -251,7 +248,7 @@ bool EffectDistortion::RealtimeInitialize()
 {
    SetBlockSize(512);
 
-   mSlaves.Clear();
+   mSlaves.clear();
 
    return true;
 }
@@ -262,14 +259,14 @@ bool EffectDistortion::RealtimeAddProcessor(unsigned WXUNUSED(numChannels), floa
 
    InstanceInit(slave, sampleRate);
 
-   mSlaves.Add(slave);
+   mSlaves.push_back(slave);
 
    return true;
 }
 
 bool EffectDistortion::RealtimeFinalize()
 {
-   mSlaves.Clear();
+   mSlaves.clear();
 
    return true;
 }
@@ -282,10 +279,22 @@ size_t EffectDistortion::RealtimeProcess(int group,
 
    return InstanceProcess(mSlaves[group], inbuf, outbuf, numSamples);
 }
+bool EffectDistortion::DefineParams( ShuttleParams & S ){
+   S.SHUTTLE_ENUM_PARAM( mParams.mTableChoiceIndx, TableTypeIndx,
+      kTableTypeStrings, nTableTypes );
+   S.SHUTTLE_PARAM( mParams.mDCBlock,       DCBlock       );
+   S.SHUTTLE_PARAM( mParams.mThreshold_dB,  Threshold_dB  );
+   S.SHUTTLE_PARAM( mParams.mNoiseFloor,    NoiseFloor    );
+   S.SHUTTLE_PARAM( mParams.mParam1,        Param1        );
+   S.SHUTTLE_PARAM( mParams.mParam2,        Param2        );
+   S.SHUTTLE_PARAM( mParams.mRepeats,       Repeats       );
+   return true;
+}
 
-bool EffectDistortion::GetAutomationParameters(EffectAutomationParameters & parms)
+bool EffectDistortion::GetAutomationParameters(CommandParameters & parms)
 {
-   parms.Write(KEY_TableTypeIndx, kTableTypeStrings[mParams.mTableChoiceIndx]);
+   parms.Write(KEY_TableTypeIndx,
+               kTableTypeStrings[mParams.mTableChoiceIndx].Internal());
    parms.Write(KEY_DCBlock, mParams.mDCBlock);
    parms.Write(KEY_Threshold_dB, mParams.mThreshold_dB);
    parms.Write(KEY_NoiseFloor, mParams.mNoiseFloor);
@@ -296,9 +305,9 @@ bool EffectDistortion::GetAutomationParameters(EffectAutomationParameters & parm
    return true;
 }
 
-bool EffectDistortion::SetAutomationParameters(EffectAutomationParameters & parms)
+bool EffectDistortion::SetAutomationParameters(CommandParameters & parms)
 {
-   ReadAndVerifyEnum(TableTypeIndx,  wxArrayString(kNumTableTypes, kTableTypeStrings));
+   ReadAndVerifyEnum(TableTypeIndx, kTableTypeStrings, nTableTypes);
    ReadAndVerifyBool(DCBlock);
    ReadAndVerifyDouble(Threshold_dB);
    ReadAndVerifyDouble(NoiseFloor);
@@ -352,17 +361,13 @@ bool EffectDistortion::LoadFactoryPreset(int id)
 
 void EffectDistortion::PopulateOrExchange(ShuttleGui & S)
 {
-   for (int i = 0; i < kNumTableTypes; i++)
-   {
-      mTableTypes.Add(wxGetTranslation(kTableTypeStrings[i]));
-   }
-
    S.AddSpace(0, 5);
    S.StartVerticalLay();
    {
       S.StartMultiColumn(4, wxCENTER);
       {
-         mTypeChoiceCtrl = S.Id(ID_Type).AddChoice(_("Distortion type:"), wxT(""), &mTableTypes);
+         auto tableTypes = LocalizedStrings(kTableTypeStrings, nTableTypes);
+         mTypeChoiceCtrl = S.Id(ID_Type).AddChoice(_("Distortion type:"), wxT(""), &tableTypes);
          mTypeChoiceCtrl->SetValidator(wxGenericValidator(&mParams.mTableChoiceIndx));
          S.SetSizeHints(-1, -1);
 

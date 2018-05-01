@@ -49,8 +49,7 @@ bool IsDragZooming(int zoomStart, int zoomEnd)
 
 WaveTrackVZoomHandle::WaveTrackVZoomHandle
 (const std::shared_ptr<WaveTrack> &pTrack, const wxRect &rect, int y)
-   : mZoomStart(y), mZoomEnd(y), mRect(rect)
-   , mpTrack{ pTrack }
+   : mpTrack{ pTrack } , mZoomStart(y), mZoomEnd(y), mRect(rect)
 {
 }
 
@@ -66,13 +65,11 @@ void WaveTrackVZoomHandle::Enter(bool)
 // the zoomKind and cause a drag-zoom-in.
 void WaveTrackVZoomHandle::DoZoom
    (AudacityProject *pProject,
-    WaveTrack *pTrack, int ZoomKind,
+    WaveTrack *pTrack, WaveTrack *partner, int ZoomKind,
     const wxRect &rect, int zoomStart, int zoomEnd,
     bool fixedMousePoint)
 {
    static const float ZOOMLIMIT = 0.001f;
-   // Assume linked track is wave or null
-   const auto partner = static_cast<WaveTrack *>(pTrack->GetLink());
    int height = rect.height;
    int ypos = rect.y;
 
@@ -185,26 +182,19 @@ void WaveTrackVZoomHandle::DoZoom
       break;
    case kZoomIn:
       {
-         // Zoom in centered on cursor
-         if (min < -1.0 || max > 1.0) {
-            min = -1.0;
-            max = 1.0;
-         }
-         else {
-            // Enforce maximum vertical zoom
-            const float oldRange = max - min;
-            const float l = std::max(ZOOMLIMIT, 0.5f * oldRange);
-            const float ratio = l / (max - min);
+         // Enforce maximum vertical zoom
+         const float oldRange = max - min;
+         const float l = std::max(ZOOMLIMIT, 0.5f * oldRange);
+         const float ratio = l / (max - min);
 
-            const float p1 = (zoomStart - ypos) / (float)height;
-            const float c = (max * (1.0 - p1) + min * p1);
-            if (fixedMousePoint)
-               min = c - ratio * (1.0f - p1) * oldRange,
-               max = c + ratio * p1 * oldRange;
-            else
-               min = c - 0.5 * l,
-               max = c + 0.5 * l;
-         }
+         const float p1 = (zoomStart - ypos) / (float)height;
+         float c = (max * (1.0 - p1) + min * p1);
+         if (fixedMousePoint)
+            min = c - ratio * (1.0f - p1) * oldRange,
+            max = c + ratio * p1 * oldRange;
+         else
+            min = c - 0.5 * l,
+            max = c + 0.5 * l;
       }
       break;
    case kZoomOut:
@@ -399,8 +389,11 @@ void WaveTrackVRulerMenuTable::InitMenu(Menu *, void *pUserData)
 
 void WaveTrackVRulerMenuTable::OnZoom( int iZoomCode )
 {
+   // Assume linked track is wave or null
+   const auto partner = static_cast<WaveTrack *>(mpData->pTrack->GetLink());
    WaveTrackVZoomHandle::DoZoom
-      (::GetActiveProject(), mpData->pTrack, iZoomCode, mpData->rect, mpData->yy, mpData->yy, false);
+      (::GetActiveProject(), mpData->pTrack, partner,
+       iZoomCode, mpData->rect, mpData->yy, mpData->yy, false);
 
    using namespace RefreshCode;
    mpData->result = UpdateVRuler | RefreshAll;
@@ -419,7 +412,7 @@ public:
    static WaveformVRulerMenuTable &Instance();
 
 private:
-   virtual void InitMenu(Menu *pMenu, void *pUserData);
+   virtual void InitMenu(Menu *pMenu, void *pUserData) override;
 
    void OnWaveformScaleType(wxCommandEvent &evt);
 };
@@ -506,7 +499,7 @@ public:
    static SpectrumVRulerMenuTable &Instance();
 
 private:
-   void InitMenu(Menu *pMenu, void *pUserData);
+   void InitMenu(Menu *pMenu, void *pUserData) override;
 
    void OnSpectrumScaleType(wxCommandEvent &evt);
 };
@@ -685,8 +678,10 @@ UIHandle::Result WaveTrackVZoomHandle::Release
       if( bVZoom ){
          if( shiftDown )
             mZoomStart=mZoomEnd;
-         DoZoom(pProject, pTrack.get(), shiftDown ? (rightUp ? kZoom1to1 : kZoomOut)  : kZoomIn, 
-            mRect, mZoomStart, mZoomEnd, false);
+         const auto partner = static_cast<WaveTrack *>(pTrack->GetLink());
+         DoZoom(pProject, pTrack.get(), partner,
+                shiftDown ? (rightUp ? kZoom1to1 : kZoomOut)  : kZoomIn,
+            mRect, mZoomStart, mZoomEnd, !shiftDown);
       }
    }
 

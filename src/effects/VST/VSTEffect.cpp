@@ -94,10 +94,32 @@
 #include "../../xml/XMLFileReader.h"
 #include "../../xml/XMLWriter.h"
 
+#if wxUSE_ACCESSIBILITY
+#include "../../widgets/WindowAccessible.h"
+#endif
+
 #include "audacity/ConfigInterface.h"
 
 #include "VSTEffect.h"
 #include "../../MemoryX.h"
+#include <cstring>
+
+static float reinterpretAsFloat(uint32_t x)
+{
+    static_assert(sizeof(float) == sizeof(uint32_t), "Cannot reinterpret uint32_t to float since sizes are different.");
+    float f;
+    std::memcpy(&f, &x, sizeof(float));
+    return f;
+}
+
+static uint32_t reinterpretAsUint32(float f)
+{
+    static_assert(sizeof(float) == sizeof(uint32_t), "Cannot reinterpret float to uint32_t since sizes are different.");
+
+    uint32_t x;
+    std::memcpy(&x, &f, sizeof(uint32_t));
+    return x;
+}
 
 // NOTE:  To debug the subprocess, use wxLogDebug and, on Windows, Debugview
 //        from TechNet (Sysinternals).
@@ -194,7 +216,7 @@ enum InfoKeys
 ///
 ///////////////////////////////////////////////////////////////////////////////
 class VSTSubProcess final : public wxProcess,
-                      public EffectIdentInterface
+                      public EffectDefinitionInterface
 {
 public:
    VSTSubProcess()
@@ -209,19 +231,14 @@ public:
       return mPath;
    }
 
-   wxString GetSymbol() override
+   IdentInterfaceSymbol GetSymbol() override
    {
       return mName;
    }
 
-   wxString GetName() override
+   IdentInterfaceSymbol GetVendor() override
    {
-      return GetSymbol();
-   }
-
-   wxString GetVendor() override
-   {
-      return mVendor;
+      return { mVendor };
    }
 
    wxString GetVersion() override
@@ -234,7 +251,7 @@ public:
       return mDescription;
    }
 
-   wxString GetFamily() override
+   IdentInterfaceSymbol GetFamilyId() override
    {
       return VSTPLUGINTYPE;
    }
@@ -309,17 +326,12 @@ wxString VSTEffectsModule::GetPath()
    return mPath;
 }
 
-wxString VSTEffectsModule::GetSymbol()
+IdentInterfaceSymbol VSTEffectsModule::GetSymbol()
 {
    return XO("VST Effects");
 }
 
-wxString VSTEffectsModule::GetName()
-{
-   return GetSymbol();
-}
-
-wxString VSTEffectsModule::GetVendor()
+IdentInterfaceSymbol VSTEffectsModule::GetVendor()
 {
    return XO("The Audacity Team");
 }
@@ -498,7 +510,6 @@ unsigned VSTEffectsModule::DiscoverPluginsAtPath(
    size_t idCnt = 0;
    size_t idNdx = 0;
 
-   bool valid = false;
    bool cont = true;
 
    while (effectTzr.HasMoreTokens() && cont)
@@ -521,7 +532,6 @@ unsigned VSTEffectsModule::DiscoverPluginsAtPath(
       {
          wxLogMessage(_("VST plugin registration failed for %s\n"), path);
          error = true;
-         valid = false;
       }
 
       wxString output;
@@ -557,7 +567,8 @@ unsigned VSTEffectsModule::DiscoverPluginsAtPath(
                if (idCnt > 3)
                {
                   progress.create( _("Scanning Shell VST"),
-                        wxString::Format(_("Registering %d of %d: %-64.64s"), 0, idCnt, proc.GetName()),
+                        wxString::Format(_("Registering %d of %d: %-64.64s"), 0, idCnt,
+                                         proc.GetSymbol().Translation()),
                         static_cast<int>(idCnt),
                         nullptr,
                         wxPD_APP_MODAL |
@@ -631,12 +642,12 @@ unsigned VSTEffectsModule::DiscoverPluginsAtPath(
                {
                   idNdx++;
                   cont = progress->Update(idNdx,
-                                          wxString::Format(_("Registering %d of %d: %-64.64s"), idNdx, idCnt, proc.GetName()));
+                     wxString::Format(_("Registering %d of %d: %-64.64s"), idNdx, idCnt,
+                        proc.GetSymbol().Translation() ));
                }
 
                if (!skip && cont)
                {
-                  valid = true;
                   if (callback)
                      callback( this, &proc );
                   ++nFound;
@@ -697,14 +708,14 @@ void VSTEffectsModule::Check(const wxChar *path)
    VSTEffect effect(path);
    if (effect.SetHost(NULL))
    {
-      wxArrayInt effectIDs = effect.GetEffectIDs();
+      auto effectIDs = effect.GetEffectIDs();
       wxString out;
 
-      if (effectIDs.GetCount() > 0)
+      if (effectIDs.size() > 0)
       {
          wxString subids;
 
-         for (size_t i = 0, cnt = effectIDs.GetCount(); i < cnt; i++)
+         for (size_t i = 0, cnt = effectIDs.size(); i < cnt; i++)
          {
             subids += wxString::Format(wxT("%d;"), effectIDs[i]);
          }
@@ -715,8 +726,9 @@ void VSTEffectsModule::Check(const wxChar *path)
       {
          out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyBegin, wxEmptyString);
          out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyPath, effect.GetPath());
-         out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyName, effect.GetName());
-         out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyVendor, effect.GetVendor());
+         out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyName, effect.GetSymbol().Internal());
+         out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyVendor,
+                                 effect.GetVendor().Internal());
          out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyVersion, effect.GetVersion());
          out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyDescription, effect.GetDescription());
          out += wxString::Format(wxT("%s%d=%d\n"), OUTPUTKEY, kKeyEffectType, effect.GetType());
@@ -1178,19 +1190,14 @@ wxString VSTEffect::GetPath()
    return mPath;
 }
 
-wxString VSTEffect::GetSymbol()
+IdentInterfaceSymbol VSTEffect::GetSymbol()
 {
    return mName;
 }
 
-wxString VSTEffect::GetName()
+IdentInterfaceSymbol VSTEffect::GetVendor()
 {
-   return GetSymbol();
-}
-
-wxString VSTEffect::GetVendor()
-{
-   return mVendor;
+   return { mVendor };
 }
 
 wxString VSTEffect::GetVersion()
@@ -1222,14 +1229,14 @@ wxString VSTEffect::GetDescription()
 }
 
 // ============================================================================
-// EffectIdentInterface Implementation
+// EffectDefinitionInterface Implementation
 // ============================================================================
 
 EffectType VSTEffect::GetType()
 {
    if (mAudioIns == 0 && mAudioOuts == 0 && mMidiIns == 0 && mMidiOuts == 0)
    {
-      return EffectTypeNone;
+      return EffectTypeTool;
    }
 
    if (mAudioIns == 0 && mMidiIns == 0)
@@ -1246,7 +1253,7 @@ EffectType VSTEffect::GetType()
 }
 
 
-wxString VSTEffect::GetFamily()
+IdentInterfaceSymbol VSTEffect::GetFamilyId()
 {
    return VSTPLUGINTYPE;
 }
@@ -1621,7 +1628,7 @@ bool VSTEffect::ShowInterface(wxWindow *parent, bool forceModal)
    return res;
 }
 
-bool VSTEffect::GetAutomationParameters(EffectAutomationParameters & parms)
+bool VSTEffect::GetAutomationParameters(CommandParameters & parms)
 {
    for (int i = 0; i < mAEffect->numParams; i++)
    {
@@ -1641,7 +1648,7 @@ bool VSTEffect::GetAutomationParameters(EffectAutomationParameters & parms)
    return true;
 }
 
-bool VSTEffect::SetAutomationParameters(EffectAutomationParameters & parms)
+bool VSTEffect::SetAutomationParameters(CommandParameters & parms)
 {
    callDispatcher(effBeginSetProgram, 0, 0, NULL, 0.0);
    for (int i = 0; i < mAEffect->numParams; i++)
@@ -2269,9 +2276,9 @@ void VSTEffect::Unload()
    }
 }
 
-wxArrayInt VSTEffect::GetEffectIDs()
+std::vector<int> VSTEffect::GetEffectIDs()
 {
-   wxArrayInt effectIDs;
+   std::vector<int> effectIDs;
 
    // Are we a shell?
    if (mVstVersion >= 2 && (VstPlugCategory) callDispatcher(effGetPlugCategory, 0, 0, NULL, 0) == kPlugCategShell)
@@ -2282,7 +2289,7 @@ wxArrayInt VSTEffect::GetEffectIDs()
       effectID = (int) callDispatcher(effShellGetNextPlugin, 0, 0, &name, 0);
       while (effectID)
       {
-         effectIDs.Add(effectID);
+         effectIDs.push_back(effectID);
          effectID = (int) callDispatcher(effShellGetNextPlugin, 0, 0, &name, 0);
       }
    }
@@ -2325,7 +2332,7 @@ bool VSTEffect::LoadParameters(const wxString & group)
       return false;
    }
 
-   EffectAutomationParameters eap;
+   CommandParameters eap;
    if (!eap.SetParameters(parms))
    {
       return false;
@@ -2353,7 +2360,7 @@ bool VSTEffect::SaveParameters(const wxString & group)
       return true;
    }
 
-   EffectAutomationParameters eap;
+   CommandParameters eap;
    if (!GetAutomationParameters(eap))
    {
       return false;
@@ -2755,6 +2762,24 @@ void VSTEffect::RemoveHandler()
 {
 }
 
+static void OnSize(wxSizeEvent & evt)
+{
+   evt.Skip();
+
+   // Once the parent dialog reaches its final size as indicated by
+   // a non-default minimum size, we set the maximum size to match.
+   // This is a bit of a hack to prevent VSTs GUI windows from resizing
+   // there's no real reason to allow it.  But, there should be a better
+   // way of handling it.
+   wxWindow *w = (wxWindow *) evt.GetEventObject();
+   wxSize sz = w->GetMinSize();
+
+   if (sz != wxDefaultSize)
+   {
+      w->SetMaxSize(sz);
+   }
+}
+
 void VSTEffect::BuildFancy()
 {
    // Turn the power on...some effects need this when the editor is open
@@ -2782,7 +2807,7 @@ void VSTEffect::BuildFancy()
 
    NeedEditIdle(true);
 
-   mDialog->Connect(wxEVT_SIZE, wxSizeEventHandler(VSTEffect::OnSize));
+   mDialog->Bind(wxEVT_SIZE, OnSize);
 
 #ifdef __WXMAC__
 #ifdef __WX_EVTLOOP_BUSY_WAITING__
@@ -2836,17 +2861,14 @@ void VSTEffect::BuildPlain()
             wxControl *item = safenew wxStaticText(scroller, 0, _("Duration:"));
             gridSizer->Add(item, 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT | wxALL, 5);
             mDuration = safenew
-               NumericTextCtrl(NumericConverter::TIME,
-               scroller,
-               ID_Duration,
-               mHost->GetDurationFormat(),
-               mHost->GetDuration(),
-               mSampleRate,
-               wxDefaultPosition,
-               wxDefaultSize,
-               true);
+               NumericTextCtrl(scroller, ID_Duration,
+                  NumericConverter::TIME,
+                  mHost->GetDurationFormat(),
+                  mHost->GetDuration(),
+                  mSampleRate,
+                  NumericTextCtrl::Options{}
+                     .AutoPos(true));
             mDuration->SetName(_("Duration"));
-            mDuration->EnableMenu();
             gridSizer->Add(mDuration, 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
             gridSizer->Add(1, 1, 0);
             gridSizer->Add(1, 1, 0);
@@ -2892,6 +2914,10 @@ void VSTEffect::BuildPlain()
                wxDefaultPosition,
                wxSize(200, -1));
             gridSizer->Add(mSliders[i], 0, wxALIGN_CENTER_VERTICAL | wxEXPAND | wxALL, 5);
+#if wxUSE_ACCESSIBILITY
+            // so that name can be set on a standard control
+            mSliders[i]->SetAccessible(safenew WindowAccessible(mSliders[i]));
+#endif
 
             mDisplays[i] = safenew wxStaticText(scroller,
                wxID_ANY,
@@ -2968,24 +2994,6 @@ void VSTEffect::RefreshParameters(int skip)
       }
 
       mSliders[i]->SetName(name);
-   }
-}
-
-void VSTEffect::OnSize(wxSizeEvent & evt)
-{
-   evt.Skip();
-
-   // Once the parent dialog reaches it's final size as indicated by
-   // a non-default minimum size, we set the maximum size to match.
-   // This is a bit of a hack to prevent VSTs GUI windows from resizing
-   // there's no real reason to allow it.  But, there should be a better
-   // way of handling it.
-   wxWindow *w = (wxWindow *) evt.GetEventObject();
-   wxSize sz = w->GetMinSize();
-
-   if (sz != wxDefaultSize)
-   {
-      w->SetMaxSize(sz);
    }
 }
 
@@ -3315,7 +3323,7 @@ bool VSTEffect::LoadFXProgram(unsigned char **bptr, ssize_t & len, int index, bo
       for (int i = 0; i < numParams; i++)
       {
          uint32_t ival = wxUINT32_SWAP_ON_LE(iptr[14 + i]);
-         float val = *((float *) &ival);
+         float val = reinterpretAsFloat(ival);
          if (val < 0.0 || val > 1.0)
          {
             return false;
@@ -3336,7 +3344,7 @@ bool VSTEffect::LoadFXProgram(unsigned char **bptr, ssize_t & len, int index, bo
          for (int i = 0; i < numParams; i++)
          {
             wxUint32 val = wxUINT32_SWAP_ON_LE(iptr[14 + i]);
-            callSetParameter(i, *((float *) &val));
+            callSetParameter(i, reinterpretAsFloat(val));
          }
          callDispatcher(effEndSetProgram, 0, 0, NULL, 0.0);
       }
@@ -3443,8 +3451,8 @@ void VSTEffect::SaveFXB(const wxFileName & fn)
 
    wxMemoryBuffer buf;
    wxInt32 subType;
-   void *chunkPtr;
-   int chunkSize;
+   void *chunkPtr = nullptr;
+   int chunkSize = 0;
    int dataSize = 148;
    wxInt32 tab[8];
    int curProg = 0 ; //mProgram->GetCurrentSelection();
@@ -3595,7 +3603,7 @@ void VSTEffect::SaveFXProgram(wxMemoryBuffer & buf, int index)
       for (int i = 0; i < mAEffect->numParams; i++)
       {
          float val = callGetParameter(i);
-         wxUint32 ival = wxUINT32_SWAP_ON_LE(*((wxUint32 *) &val));
+         wxUint32 ival = wxUINT32_SWAP_ON_LE(reinterpretAsUint32(val));
          buf.AppendData(&ival, sizeof(ival));
       }
    }
@@ -3613,7 +3621,8 @@ void VSTEffect::SaveXML(const wxFileName & fn)
    xmlFile.WriteAttr(wxT("version"), wxT("2"));
 
    xmlFile.StartTag(wxT("effect"));
-   xmlFile.WriteAttr(wxT("name"), GetName());
+   // Use internal name only in persistent information
+   xmlFile.WriteAttr(wxT("name"), GetSymbol().Internal());
    xmlFile.WriteAttr(wxT("uniqueID"), mAEffect->uniqueID);
    xmlFile.WriteAttr(wxT("version"), mAEffect->version);
    xmlFile.WriteAttr(wxT("numParams"), mAEffect->numParams);
@@ -3725,7 +3734,7 @@ bool VSTEffect::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
                return false;
             }
 
-            if (value != GetName())
+            if (value != GetSymbol().Internal())
             {
                wxString msg;
                msg.Printf(_("This parameter file was saved from %s.  Continue?"), value);

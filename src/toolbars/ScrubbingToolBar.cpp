@@ -38,6 +38,7 @@
 #include "../widgets/AButton.h"
 #include "../widgets/Ruler.h"
 #include "../tracks/ui/Scrubbing.h"
+#include "../commands/CommandContext.h"
 
 #include "../Experimental.h"
 
@@ -76,15 +77,16 @@ void ScrubbingToolBar::Create(wxWindow * parent)
 /// MakeButtons() with fewer arguments
 /// Very similar to code in ControlToolBar...
 AButton *ScrubbingToolBar::AddButton
-(teBmps eEnabledUp, teBmps eEnabledDown, teBmps eDisabled,
+(ScrubbingToolBar *pBar,
+ teBmps eEnabledUp, teBmps eEnabledDown, teBmps eDisabled,
  int id,
  const wxChar *label,
  bool toggle)
 {
-   AButton *&r = mButtons[id];
+   AButton *&r = pBar->mButtons[id];
 
    r = ToolBar::MakeButton
-   (this,
+   (pBar,
     bmpRecoloredUpSmall, bmpRecoloredDownSmall, bmpRecoloredUpHiliteSmall, bmpRecoloredHiliteSmall,
     eEnabledUp, eEnabledDown, eDisabled,
     wxWindowID(id),
@@ -96,7 +98,7 @@ AButton *ScrubbingToolBar::AddButton
    // JKC: Unlike ControlToolBar, does not have a focus rect.  Shouldn't it?
    // r->SetFocusRect( r->GetRect().Deflate( 4, 4 ) );
 
-   Add( r, 0, wxALIGN_CENTER );
+   pBar->Add( r, 0, wxALIGN_CENTER );
 
    return r;
 }
@@ -107,11 +109,11 @@ void ScrubbingToolBar::Populate()
    MakeButtonBackgroundsSmall();
 
    /* Buttons */
-   AddButton(bmpScrub, bmpScrub, bmpScrubDisabled, STBScrubID,
+   AddButton(this, bmpScrub, bmpScrub, bmpScrubDisabled, STBScrubID,
              _("Scrub"), true);
-   AddButton(bmpSeek, bmpSeek, bmpSeekDisabled, STBSeekID,
+   AddButton(this, bmpSeek, bmpSeek, bmpSeekDisabled, STBSeekID,
              _("Seek"), true);
-   AddButton(bmpToggleScrubRuler, bmpToggleScrubRuler, bmpToggleScrubRuler,
+   AddButton(this, bmpToggleScrubRuler, bmpToggleScrubRuler, bmpToggleScrubRuler,
              STBRulerID,
              _("Scrub Ruler"), true);
 
@@ -134,10 +136,10 @@ void ScrubbingToolBar::RegenerateTooltips()
 {
 #if wxUSE_TOOLTIPS
    auto fn = [&]
-   (AButton &button, const wxString &label, const wxString &command)
+   (AButton &button, const wxString &label, const wxString &cmd)
    {
-      LocalizedCommandNameVector commands( 1u, { label, command } );
-      ToolBar::SetButtonToolTip(button, commands);
+      TranslatedInternalString command{ cmd, label };
+      ToolBar::SetButtonToolTip( button, &command, 1u );
    };
 
    auto project = GetActiveProject();

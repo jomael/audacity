@@ -111,17 +111,13 @@ wxString AudioUnitEffectsModule::GetPath()
    return mPath;
 }
 
-wxString AudioUnitEffectsModule::GetSymbol()
+IdentInterfaceSymbol AudioUnitEffectsModule::GetSymbol()
 {
-   return wxT("Audio Unit Effects");
-}
-
-wxString AudioUnitEffectsModule::GetName()
-{
+   /* 18n-hint: Audio Unit is the name of an Apple audio software protocol */
    return XO("Audio Unit Effects");
 }
 
-wxString AudioUnitEffectsModule::GetVendor()
+IdentInterfaceSymbol AudioUnitEffectsModule::GetVendor()
 {
    return XO("The Audacity Team");
 }
@@ -884,19 +880,14 @@ wxString AudioUnitEffect::GetPath()
    return mPath;
 }
 
-wxString AudioUnitEffect::GetSymbol()
+IdentInterfaceSymbol AudioUnitEffect::GetSymbol()
 {
    return mName;
 }
 
-wxString AudioUnitEffect::GetName()
+IdentInterfaceSymbol AudioUnitEffect::GetVendor()
 {
-   return GetSymbol();
-}
-
-wxString AudioUnitEffect::GetVendor()
-{
-   return mVendor;
+   return { mVendor };
 }
 
 wxString AudioUnitEffect::GetVersion()
@@ -941,7 +932,7 @@ EffectType AudioUnitEffect::GetType()
    return EffectTypeProcess;
 }
 
-wxString AudioUnitEffect::GetFamily()
+IdentInterfaceSymbol AudioUnitEffect::GetFamilyId()
 {
    return AUDIOUNITEFFECTS_FAMILY;
 }
@@ -1472,7 +1463,7 @@ bool AudioUnitEffect::ShowInterface(wxWindow *parent, bool forceModal)
    return res;
 }
 
-bool AudioUnitEffect::GetAutomationParameters(EffectAutomationParameters & parms)
+bool AudioUnitEffect::GetAutomationParameters(CommandParameters & parms)
 {
    OSStatus result;
    UInt32 dataSize;
@@ -1545,7 +1536,7 @@ bool AudioUnitEffect::GetAutomationParameters(EffectAutomationParameters & parms
    return true;
 }
 
-bool AudioUnitEffect::SetAutomationParameters(EffectAutomationParameters & parms)
+bool AudioUnitEffect::SetAutomationParameters(CommandParameters & parms)
 {
    OSStatus result;
    UInt32 dataSize;
@@ -1890,7 +1881,7 @@ bool AudioUnitEffect::LoadParameters(const wxString & group)
       return false;
    }
 
-   EffectAutomationParameters eap;
+   CommandParameters eap;
    if (!eap.SetParameters(parms))
    {
       return false;
@@ -1901,7 +1892,7 @@ bool AudioUnitEffect::LoadParameters(const wxString & group)
 
 bool AudioUnitEffect::SaveParameters(const wxString & group)
 {
-   EffectAutomationParameters eap;
+   CommandParameters eap;
    if (!GetAutomationParameters(eap))
    {
       return false;
@@ -1965,7 +1956,9 @@ bool AudioUnitEffect::SetRateAndChannels()
                                  sizeof(Float64));
    if (result != noErr)
    {
-      wxPrintf("%ls Didn't accept sample rate on global\n", GetName().wx_str());
+      wxPrintf("%ls Didn't accept sample rate on global\n",
+               // Exposing internal name only in debug printf
+               GetSymbol().Internal().wx_str());
       return false;
    }
 
@@ -1979,7 +1972,9 @@ bool AudioUnitEffect::SetRateAndChannels()
                                     sizeof(Float64));
       if (result != noErr)
       {
-         wxPrintf("%ls Didn't accept sample rate on input\n", GetName().wx_str());
+         wxPrintf("%ls Didn't accept sample rate on input\n",
+               // Exposing internal name only in debug printf
+               GetSymbol().Internal().wx_str());
          return false;
       }
 
@@ -1991,7 +1986,9 @@ bool AudioUnitEffect::SetRateAndChannels()
                                     sizeof(AudioStreamBasicDescription));
       if (result != noErr)
       {
-         wxPrintf("%ls didn't accept stream format on input\n", GetName().wx_str());
+         wxPrintf("%ls didn't accept stream format on input\n",
+               // Exposing internal name only in debug printf
+               GetSymbol().Internal().wx_str());
          return false;
       }
    }
@@ -2006,7 +2003,9 @@ bool AudioUnitEffect::SetRateAndChannels()
                                     sizeof(Float64));
       if (result != noErr)
       {
-         wxPrintf("%ls Didn't accept sample rate on output\n", GetName().wx_str());
+         wxPrintf("%ls Didn't accept sample rate on output\n",
+               // Exposing internal name only in debug printf
+               GetSymbol().Internal().wx_str());
          return false;
       }
    
@@ -2020,7 +2019,9 @@ bool AudioUnitEffect::SetRateAndChannels()
    
       if (result != noErr)
       {
-         wxPrintf("%ls didn't accept stream format on output\n", GetName().wx_str());
+         wxPrintf("%ls didn't accept stream format on output\n",
+               // Exposing internal name only in debug printf
+               GetSymbol().Internal().wx_str());
          return false;
       }
    }

@@ -17,7 +17,6 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../Project.h"
 #include "../../TrackPanel.h"
 #include "../../TrackPanelCell.h"
-#include "../../commands/CommandFunctors.h"
 #include "../../prefs/TracksPrefs.h"
 #include "../../toolbars/ControlToolBar.h"
 #include "../../toolbars/ScrubbingToolBar.h"
@@ -29,6 +28,8 @@ Paul Licameli split from TrackPanel.cpp
 #endif
 
 #include "../../widgets/Ruler.h"
+#include "../../commands/CommandFunctors.h"
+#include "../../commands/CommandContext.h"
 
 #include <algorithm>
 
@@ -182,7 +183,8 @@ void Scrubber::ScrubPoller::Notify()
 }
 
 Scrubber::Scrubber(AudacityProject *project)
-   : mScrubToken(-1)
+   : mInOneShotMode( false )
+   , mScrubToken(-1)
    , mPaused(true)
    , mScrubSpeedDisplayCountdown(0)
    , mScrubStartPosition(-1)
@@ -194,13 +196,12 @@ Scrubber::Scrubber(AudacityProject *project)
    , mProject(project)
    , mPoller { std::make_unique<ScrubPoller>(*this) }
    , mOptions {}
-   , mInOneShotMode( false )
 
 {
    if (wxTheApp)
-      wxTheApp->Connect
+      wxTheApp->Bind
       (wxEVT_ACTIVATE_APP,
-      wxActivateEventHandler(Scrubber::OnActivateOrDeactivateApp), NULL, this);
+       &Scrubber::OnActivateOrDeactivateApp, this);
    mProject->PushEventHandler(&mForwarder);
 }
 
@@ -212,10 +213,6 @@ Scrubber::~Scrubber()
 #endif
 
    mProject->PopEventHandler();
-   if (wxTheApp)
-      wxTheApp->Disconnect
-      (wxEVT_ACTIVATE_APP,
-      wxActivateEventHandler(Scrubber::OnActivateOrDeactivateApp), NULL, this);
 }
 
 namespace {
@@ -730,17 +727,8 @@ ScrubbingOverlay::ScrubbingOverlay(AudacityProject *project)
    , mLastScrubSpeedText()
    , mNextScrubSpeedText()
 {
-   mProject->Connect(EVT_TRACK_PANEL_TIMER,
-      wxCommandEventHandler(ScrubbingOverlay::OnTimer),
-      NULL,
-      this);
-}
-
-ScrubbingOverlay::~ScrubbingOverlay()
-{
-   mProject->Disconnect(EVT_TRACK_PANEL_TIMER,
-      wxCommandEventHandler(ScrubbingOverlay::OnTimer),
-      NULL,
+   mProject->Bind(EVT_TRACK_PANEL_TIMER,
+      &ScrubbingOverlay::OnTimer,
       this);
 }
 
@@ -1014,12 +1002,16 @@ void Scrubber::AddMenuItems()
    for (const auto &item : menuItems) {
       if (item.StatusTest)
          cm->AddCheck(item.name, wxGetTranslation(item.label),
+                      // No menu items yet have dialogs
+                      false,
                       findme, static_cast<CommandFunctorPointer>(item.memFn),
                       false,
                       item.flags, item.flags);
       else
          // The start item
          cm->AddItem(item.name, wxGetTranslation(item.label),
+                     // No menu items yet have dialogs
+                     false,
                      findme, static_cast<CommandFunctorPointer>(item.memFn),
                      item.flags, item.flags);
    }

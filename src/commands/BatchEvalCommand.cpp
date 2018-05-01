@@ -13,11 +13,13 @@
 
 *//*******************************************************************/
 
+#include "../Audacity.h"
 #include "BatchEvalCommand.h"
+#include "CommandContext.h"
 
-wxString BatchEvalCommandType::BuildName()
+IdentInterfaceSymbol BatchEvalCommandType::BuildName()
 {
-   return wxT("BatchCommand");
+   return { wxT("BatchCommand"), XO("Batch Command") };
 }
 
 void BatchEvalCommandType::BuildSignature(CommandSignature &signature)
@@ -26,36 +28,44 @@ void BatchEvalCommandType::BuildSignature(CommandSignature &signature)
    signature.AddParameter(wxT("CommandName"), wxT(""), std::move(commandNameValidator));
    auto paramValidator = make_movable<DefaultValidator>();
    signature.AddParameter(wxT("ParamString"), wxT(""), std::move(paramValidator));
-   auto chainValidator = make_movable<DefaultValidator>();
-   signature.AddParameter(wxT("ChainName"), wxT(""), std::move(chainValidator));
+   auto macroValidator = make_movable<DefaultValidator>();
+   signature.AddParameter(wxT("MacroName"), wxT(""), std::move(macroValidator));
 }
 
-CommandHolder BatchEvalCommandType::Create(std::unique_ptr<CommandOutputTarget> &&target)
+OldStyleCommandPointer BatchEvalCommandType::Create(std::unique_ptr<CommandOutputTargets> && WXUNUSED(target))
 {
-   return std::make_shared<BatchEvalCommand>(*this, std::move(target));
+   return std::make_shared<BatchEvalCommand>(*this);
 }
 
-bool BatchEvalCommand::Apply(CommandExecutionContext WXUNUSED(context))
+bool BatchEvalCommand::Apply(const CommandContext & context)
 {
+   // Uh oh, I need to build a catalog, expensively
+   // Maybe it can be built in one long-lived place and shared among command
+   // objects instead?
+   MacroCommandsCatalog catalog(&context.project);
 
-   wxString chainName = GetString(wxT("ChainName"));
-   if (chainName != wxT(""))
+   wxString macroName = GetString(wxT("MacroName"));
+   if (macroName != wxT(""))
    {
-      BatchCommands batch;
-      batch.ReadChain(chainName);
-      return batch.ApplyChain();
+      MacroCommands batch;
+      batch.ReadMacro(macroName);
+      return batch.ApplyMacro(catalog);
    }
 
    wxString cmdName = GetString(wxT("CommandName"));
    wxString cmdParams = GetString(wxT("ParamString"));
+   auto iter = catalog.ByCommandId(cmdName);
+   const wxString &friendly = (iter == catalog.end())
+      ? cmdName // Expose internal name to user, in default of a better one!
+      : iter->name.Translated();
 
    // Create a Batch that will have just one command in it...
-   BatchCommands Batch;
-   bool bResult = Batch.ApplyCommand(cmdName, cmdParams);
+   MacroCommands Batch;
+   bool bResult = Batch.ApplyCommand(friendly, cmdName, cmdParams, &context);
    // Relay messages, if any.
    wxString Message = Batch.GetMessage();
    if( !Message.IsEmpty() )
-      Status( Message );
+      context.Status( Message );
    return bResult;
 }
 

@@ -48,12 +48,6 @@
 // feature to link audio tracks to a label track
 #define EXPERIMENTAL_SYNC_LOCK
 
-// JKC: Enable to get extra buttons in the screenshot tools.
-//#define EXPERIMENTAL_DOCS_AUTOMATION
-// JKC: Enable to get experiemental code to move
-// mod-script-pipe towards being mainstream.
-//#define EXPERIMENTAL_AUTOMATION
-
 // DA: Enables dark audacity theme and customisations.
 //#define EXPERIMENTAL_DA
 
@@ -250,5 +244,11 @@
 // PRL 5 Jan 2018
 // Easy change of keystroke bindings for menu items
 #define EXPERIMENTAL_EASY_CHANGE_KEY_BINDINGS
+
+// PRL 17 Mar 2018
+// Hoping to commit to use of this branch before 2.3.0 is out.
+// Don't use our own RingBuffer class, but reuse PortAudio's which includes
+// proper memory fences.
+#undef EXPERIMENTAL_REWRITE_RING_BUFFER
 
 #endif

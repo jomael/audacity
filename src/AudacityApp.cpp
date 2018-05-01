@@ -68,6 +68,7 @@ It handles initialization and termination by subclassing wxApp.
 #include "DirManager.h"
 #include "commands/CommandHandler.h"
 #include "commands/AppCommandEvent.h"
+#include "commands/CommandContext.h"
 #include "effects/Contrast.h"
 #include "widgets/ASlider.h"
 #include "FFmpeg.h"
@@ -240,7 +241,7 @@ It handles initialization and termination by subclassing wxApp.
 ////////////////////////////////////////////////////////////
 
 DEFINE_EVENT_TYPE(EVT_OPEN_AUDIO_FILE);
-DEFINE_EVENT_TYPE(EVT_LANGUAGE_CHANGE);
+wxDEFINE_EVENT(EVT_LANGUAGE_CHANGE, wxCommandEvent);
 
 #if 0
 #ifdef __WXGTK__
@@ -1063,8 +1064,11 @@ void AudacityApp::OnFatalException()
 }
 
 
+#ifdef _MSC_VER
+// If this is compiled with MSVC (Visual Studio)
 #pragma warning( push )
 #pragma warning( disable : 4702) // unreachable code warning.
+#endif //_MSC_VER
 
 bool AudacityApp::OnExceptionInMainLoop()
 {
@@ -1087,6 +1091,9 @@ bool AudacityApp::OnExceptionInMainLoop()
          // failed operation
          pProject->RollbackState();
 
+         // Forget pending changes in the TrackList
+         pProject->GetTracks()->ClearPendingTracks();
+
          pProject->RedrawProject();
 
          // Give the user an alert
@@ -1105,7 +1112,9 @@ bool AudacityApp::OnExceptionInMainLoop()
    // Shouldn't ever reach this line
    return false;
 }
+#ifdef _MSC_VER
 #pragma warning( pop )
+#endif //_MSC_VER
 
 #if defined(EXPERIMENTAL_CRASH_REPORT)
 void AudacityApp::GenerateCrashReport(wxDebugReport::Context ctx)
@@ -1640,7 +1649,7 @@ bool AudacityApp::OnInit()
 
 void AudacityApp::InitCommandHandler()
 {
-   mCmdHandler = std::make_unique<CommandHandler>(*this);
+   mCmdHandler = std::make_unique<CommandHandler>();
    //SetNextHandler(mCmdHandler);
 }
 
@@ -1894,14 +1903,22 @@ bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
             sock->Connect(addr, true);
             if (sock->IsConnected())
             {
-               for (size_t i = 0, cnt = parser->GetParamCount(); i < cnt; i++)
+               if (parser->GetParamCount() > 0)
                {
-                  // Send the filename
-                  wxString param = parser->GetParam(i);
-                  sock->WriteMsg((const wxChar *) param, (param.Len() + 1) * sizeof(wxChar));
+                  for (size_t i = 0, cnt = parser->GetParamCount(); i < cnt; i++)
+                  {
+                     // Send the filename
+                     wxString param = parser->GetParam(i);
+                     sock->WriteMsg((const wxChar *) param, (param.Len() + 1) * sizeof(wxChar));
+                  }
+               }
+               else
+               {
+                  // Send an empty string to force existing Audacity to front
+                  sock->WriteMsg(wxEmptyString, sizeof(wxChar));
                }
 
-               return false;
+               return sock->Error();
             }
 
             wxMilliSleep(100);

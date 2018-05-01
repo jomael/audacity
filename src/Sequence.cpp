@@ -35,7 +35,6 @@
 #include <float.h>
 #include <math.h>
 
-#include <wx/dynarray.h>
 #include <wx/intl.h>
 #include <wx/filefn.h>
 #include <wx/ffile.h>
@@ -862,7 +861,7 @@ bool Sequence::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
             // The check intended here was already done in DirManager::HandleXMLTag(), where
             // it let the block be built, then checked against mMaxSamples, and deleted the block
             // if the size of the block is bigger than mMaxSamples.
-            if (nValue > mMaxSamples)
+            if (static_cast<unsigned long long>(nValue) > mMaxSamples)
             {
                mErrorOpening = true;
                return false;
@@ -1041,7 +1040,7 @@ void Sequence::WriteXML(XMLWriter &xmlFile) const
    xmlFile.StartTag(wxT("sequence"));
 
    xmlFile.WriteAttr(wxT("maxsamples"), mMaxSamples);
-   xmlFile.WriteAttr(wxT("sampleformat"), mSampleFormat);
+   xmlFile.WriteAttr(wxT("sampleformat"), (size_t)mSampleFormat);
    xmlFile.WriteAttr(wxT("numsamples"), mNumSamples.as_long_long() );
 
    for (b = 0; b < mBlock.size(); b++) {
@@ -1799,7 +1798,7 @@ void Sequence::Delete(sampleCount start, sampleCount len)
          Read(scratch.ptr() + prepreLen*sampleSize, mSampleFormat,
               preBlock, 0, preBufferLen, true);
 
-         newBlock.erase(newBlock.end() - 1);
+         newBlock.pop_back();
          Blockify(*mDirManager, mMaxSamples, mSampleFormat,
                   newBlock, prepreBlock.start, scratch.ptr(), sum);
       }

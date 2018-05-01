@@ -42,6 +42,7 @@
 #include "ImportPlugin.h"
 
 #include "../Tags.h"
+#include "../prefs/QualityPrefs.h"
 
 #include "../Experimental.h"
 
@@ -138,8 +139,8 @@ class FLACImportPlugin final : public ImportPlugin
 
    ~FLACImportPlugin() { }
 
-   wxString GetPluginStringID() { return wxT("libflac"); }
-   wxString GetPluginFormatDescription();
+   wxString GetPluginStringID() override { return wxT("libflac"); }
+   wxString GetPluginFormatDescription() override;
    std::unique_ptr<ImportFileHandle> Open(const wxString &Filename)  override;
 };
 
@@ -224,7 +225,7 @@ void MyFLACFile::metadata_callback(const FLAC__StreamMetadata *metadata)
 
       // FIXME: not declared when compiling on Ubuntu.
       //case FLAC__MAX_METADATA_TYPE: // quiet compiler warning with this line
-
+      default:
       break;
    }
 }
@@ -350,8 +351,7 @@ FLACImportFileHandle::FLACImportFileHandle(const wxString & name)
    mStreamInfoDone(false),
    mUpdateResult(ProgressResult::Success)
 {
-   mFormat = (sampleFormat)
-      gPrefs->Read(wxT("/SamplingRate/DefaultProjectSampleFormat"), floatSample);
+   mFormat = QualityPrefs::SampleFormatChoice();
    mFile = std::make_unique<MyFLACFile>(this);
 }
 

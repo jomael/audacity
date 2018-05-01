@@ -36,9 +36,9 @@
 #include "../AColor.h"
 #include "../Internat.h"
 
-GUIPrefs::GUIPrefs(wxWindow * parent)
+GUIPrefs::GUIPrefs(wxWindow * parent, wxWindowID winid)
 /* i18n-hint: refers to Audacity's user interface settings */
-:  PrefsPanel(parent, _("Interface"))
+:  PrefsPanel(parent, winid, _("Interface"))
 {
    Populate();
 }
@@ -142,28 +142,24 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
                      wxT(""),
                      mLangNames,
                      mLangCodes);
-         S.SetSizeHints(mLangNames);
 
          S.TieChoice(_("Location of &Manual:"),
                      wxT("/GUI/Help"),
                      wxT("Local"),
                      mHtmlHelpChoices,
                      mHtmlHelpCodes);
-         S.SetSizeHints(mHtmlHelpChoices);
 
          S.TieChoice(_("Th&eme:"),
                      wxT("/GUI/Theme"),
                      defaultTheme,
                      mThemeChoices,
                      mThemeCodes);
-         S.SetSizeHints(mThemeChoices);
 
          S.TieChoice(_("Meter dB &range:"),
                      ENV_DB_KEY,
                      defaultRange,
                      mRangeChoices,
                      mRangeCodes);
-         S.SetSizeHints(mRangeChoices);
       }
       S.EndMultiColumn();
 //      S.AddSpace(10);
@@ -176,12 +172,13 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
    }
    S.EndStatic();
 
-   S.StartStatic(_("Show"));
+   S.StartStatic(_("Options"));
    {
-      S.TieCheckBox(_("'How to Get &Help' at launch"),
+      // Start wording of options with a verb, if possible.
+      S.TieCheckBox(_("Show 'How to Get &Help' at launch"),
                     wxT("/GUI/ShowSplashScreen"),
                     true);
-      S.TieCheckBox(_("E&xtra menus"),
+      S.TieCheckBox(_("Show e&xtra menus"),
                     wxT("/GUI/ShowExtraMenus"),
                     false);
 #ifdef EXPERIMENTAL_THEME_PREFS
@@ -191,11 +188,6 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
                     wxT("/GUI/ShowMac"),
                     false);
 #endif
-   }
-   S.EndStatic();
-
-   S.StartStatic(_("Behaviors"));
-   {
       S.TieCheckBox(_("&Beep on completion of longer activities"),
                     wxT("/GUI/BeepOnCompletion"),
                     false);
@@ -207,6 +199,7 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
                     true);
    }
    S.EndStatic();
+
    S.EndScroller();
 }
 
@@ -233,8 +226,8 @@ wxString GUIPrefs::HelpPageName()
    return "Interface_Preferences";
 }
 
-PrefsPanel *GUIPrefsFactory::Create(wxWindow *parent)
+PrefsPanel *GUIPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
-   return safenew GUIPrefs(parent);
+   return safenew GUIPrefs(parent, winid);
 }

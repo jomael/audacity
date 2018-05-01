@@ -96,7 +96,7 @@ WaveTrack::WaveTrack(const std::shared_ptr<DirManager> &projDirManager, sampleFo
    // Force creation always:
    WaveformSettings &settings = GetIndependentWaveformSettings();
 
-   mDisplay = FindDefaultViewMode();
+   mDisplay = TracksPrefs::ViewModeChoice();
    if (mDisplay == obsoleteWaveformDBDisplay) {
       mDisplay = Waveform;
       settings.scaleType = WaveformSettings::stLogarithmic;
@@ -163,6 +163,33 @@ void WaveTrack::Init(const WaveTrack &orig)
    mDisplayLocationsCache.clear();
 }
 
+void WaveTrack::Reinit(const WaveTrack &orig)
+{
+   Init(orig);
+
+   {
+      auto &settings = orig.mpSpectrumSettings;
+      if (settings)
+         mpSpectrumSettings = std::make_unique<SpectrogramSettings>(*settings);
+      else
+         mpSpectrumSettings.reset();
+   }
+
+   {
+      auto &settings = orig.mpWaveformSettings;
+      if (settings)
+         mpWaveformSettings = std::make_unique<WaveformSettings>(*settings);
+      else
+         mpWaveformSettings.reset();
+   }
+
+   this->SetOffset(orig.GetOffset());
+
+#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
+   // To do:  mYv, mHeightV, mPerY, mVirtualStereo
+#endif
+}
+
 void WaveTrack::Merge(const Track &orig)
 {
    if (orig.GetKind() == Wave)
@@ -226,32 +253,6 @@ void WaveTrack::SetPanFromChannelType()
       SetPan( 1.0f );
 };
 
-
-//static
-WaveTrack::WaveTrackDisplay WaveTrack::FindDefaultViewMode()
-{
-   // PRL:  Bugs 1043, 1044
-   // 2.1.1 writes a NEW key for this preference, which got NEW values,
-   // to avoid confusing version 2.1.0 if it reads the preference file afterwards.
-   // Prefer the NEW preference key if it is present
-
-   WaveTrack::WaveTrackDisplay viewMode;
-   gPrefs->Read(wxT("/GUI/DefaultViewModeNew"), (int*)&viewMode, -1);
-
-   // Default to the old key only if not, default the value if it's not there either
-   wxASSERT(WaveTrack::MinDisplay >= 0);
-   if (viewMode < 0) {
-      int oldMode;
-      gPrefs->Read(wxT("/GUI/DefaultViewMode"), &oldMode,
-         (int)(WaveTrack::Waveform));
-      viewMode = WaveTrack::ConvertLegacyDisplayValue(oldMode);
-   }
-
-   // Now future-proof 2.1.1 against a recurrence of this sort of bug!
-   viewMode = WaveTrack::ValidateWaveTrackDisplay(viewMode);
-
-   return viewMode;
-}
 
 // static
 WaveTrack::WaveTrackDisplay
@@ -452,20 +453,25 @@ float WaveTrack::GetChannelGain(int channel) const
       return right*mGain;
 }
 
-void WaveTrack::SetMinimized(bool isMinimized){
+void WaveTrack::DoSetMinimized(bool isMinimized){
 
 #ifdef EXPERIMENTAL_HALF_WAVE
-   // Show half wave on collapse, full on restore.
-   std::shared_ptr<TrackVRulerControls> pTvc = GetVRulerControls();
+   bool bHalfWave;
+   gPrefs->Read(wxT("/GUI/CollapseToHalfWave"), &bHalfWave, false);
+   if( bHalfWave )
+   {
+      // Show half wave on collapse, full on restore.
+      std::shared_ptr<TrackVRulerControls> pTvc = GetVRulerControls();
 
-   // An awkward workaround for a function that lives 'in the wrong place'.
-   // We use magic numbers, 0 and 1, to tell it to zoom reset or zoom half-wave.
-   WaveTrackVRulerControls * pWtvc = reinterpret_cast<WaveTrackVRulerControls*>(pTvc.get());
-   if( pWtvc )
-      pWtvc->DoZoomPreset( isMinimized ? 1:0);
+      // An awkward workaround for a function that lives 'in the wrong place'.
+      // We use magic numbers, 0 and 1, to tell it to zoom reset or zoom half-wave.
+      WaveTrackVRulerControls * pWtvc = reinterpret_cast<WaveTrackVRulerControls*>(pTvc.get());
+      if( pWtvc )
+         pWtvc->DoZoomPreset( isMinimized ? 1:0);
+   }
 #endif
 
-   Track::SetMinimized( isMinimized );
+   PlayableTrack::DoSetMinimized( isMinimized );
 }
 
 void WaveTrack::SetWaveColorIndex(int colorIndex)
@@ -712,6 +718,23 @@ void WaveTrack::SetSpectrogramSettings(std::unique_ptr<SpectrogramSettings> &&pS
    }
 }
 
+void WaveTrack::UseSpectralPrefs( bool bUse )
+{  
+   if( bUse ){
+      if( !mpSpectrumSettings )
+         return;
+      // reset it, and next we will be getting the defaults.
+      mpSpectrumSettings.reset();
+   }
+   else {
+      if( mpSpectrumSettings )
+         return;
+      GetIndependentSpectrogramSettings();
+   }
+}
+
+
+
 const WaveformSettings &WaveTrack::GetWaveformSettings() const
 {
    if (mpWaveformSettings)
@@ -776,7 +799,7 @@ void WaveTrack::ClearAndPaste(double t0, // Start of time to clear
       return;
    }
 
-   wxArrayDouble splits;
+   std::vector<double> splits;
    WaveClipHolders cuts;
 
    // If provided time warper was NULL, use a default one that does nothing
@@ -795,13 +818,13 @@ void WaveTrack::ClearAndPaste(double t0, // Start of time to clear
 
       // Remember clip boundaries as locations to split
       st = LongSamplesToTime(TimeToLongSamples(clip->GetStartTime()));
-      if (st >= t0 && st <= t1 && splits.Index(st) == wxNOT_FOUND) {
-         splits.Add(st);
+      if (st >= t0 && st <= t1 && !make_iterator_range(splits).contains(st)) {
+         splits.push_back(st);
       }
 
       st = LongSamplesToTime(TimeToLongSamples(clip->GetEndTime()));
-      if (st >= t0 && st <= t1 && splits.Index(st) == wxNOT_FOUND) {
-         splits.Add(st);
+      if (st >= t0 && st <= t1 && !make_iterator_range(splits).contains(st)) {
+         splits.push_back(st);
       }
 
       // Search for cut lines
@@ -835,7 +858,7 @@ void WaveTrack::ClearAndPaste(double t0, // Start of time to clear
       Paste(t0, src);
       {
          // First, merge the NEW clip(s) in with the existing clips
-         if (merge && splits.GetCount() > 0)
+         if (merge && splits.size() > 0)
          {
             // Now t1 represents the absolute end of the pasted data.
             t1 = t0 + src->GetEndTime();
@@ -991,8 +1014,7 @@ void WaveTrack::HandleClear(double t0, double t1,
    if (t1 < t0)
       THROW_INCONSISTENCY_EXCEPTION;
 
-   bool editClipCanMove = true;
-   gPrefs->Read(wxT("/GUI/EditClipCanMove"), &editClipCanMove);
+   bool editClipCanMove = gPrefs->GetEditClipsCanMove();
 
    WaveClipPointers clipsToDelete;
    WaveClipHolders clipsToAdd;
@@ -1170,9 +1192,8 @@ void WaveTrack::SyncLockAdjust(double oldT1, double newT1)
 void WaveTrack::Paste(double t0, const Track *src)
 // WEAK-GUARANTEE
 {
-   bool editClipCanMove = true;
-   gPrefs->Read(wxT("/GUI/EditClipCanMove"), &editClipCanMove);
-
+   bool editClipCanMove = gPrefs->GetEditClipsCanMove();
+   
    if( src == NULL )
       // THROW_INCONSISTENCY_EXCEPTION; // ?
       return;
@@ -1949,13 +1970,14 @@ float WaveTrack::GetRMS(double t0, double t1, bool mayThrow) const
 
 bool WaveTrack::Get(samplePtr buffer, sampleFormat format,
                     sampleCount start, size_t len, fillFormat fill,
-                    bool mayThrow) const
+                    bool mayThrow, sampleCount * pNumCopied) const
 {
    // Simple optimization: When this buffer is completely contained within one clip,
    // don't clear anything (because we won't have to). Otherwise, just clear
    // everything to be on the safe side.
    bool doClear = true;
    bool result = true;
+   sampleCount samplesCopied = 0;
    for (const auto &clip: mClips)
    {
       if (start >= clip->GetStartSample() && start+len <= clip->GetEndSample())
@@ -2018,9 +2040,12 @@ bool WaveTrack::Get(samplePtr buffer, sampleFormat format,
                            SAMPLE_SIZE(format)),
                format, inclipDelta, samplesToCopy.as_size_t(), mayThrow ))
             result = false;
+         else
+            samplesCopied += samplesToCopy;
       }
    }
-
+   if( pNumCopied )
+      *pNumCopied = samplesCopied;
    return result;
 }
 
@@ -2449,8 +2474,7 @@ void WaveTrack::ExpandCutLine(double cutLinePosition, double* cutlineStart,
                               double* cutlineEnd)
 // STRONG-GUARANTEE
 {
-   bool editClipCanMove = true;
-   gPrefs->Read(wxT("/GUI/EditClipCanMove"), &editClipCanMove);
+   bool editClipCanMove = gPrefs->GetEditClipsCanMove();
 
    // Find clip which contains this cut line
    double start = 0, end = 0;

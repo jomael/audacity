@@ -43,7 +43,7 @@ EffectRepair::~EffectRepair()
 
 // IdentInterface implementation
 
-wxString EffectRepair::GetSymbol()
+IdentInterfaceSymbol EffectRepair::GetSymbol()
 {
    return REPAIR_PLUGIN_SYMBOL;
 }
@@ -53,7 +53,7 @@ wxString EffectRepair::GetDescription()
    return _("Sets the peak amplitude of a one or more tracks");
 }
 
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 
 EffectType EffectRepair::GetType()
 {

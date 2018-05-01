@@ -1,7 +1,7 @@
 Audacity(R): free, open source, cross-platform audio software for 
 multi-track recording and editing: https://www.audacityteam.org/ . 
 
-User suppport is provided on Audacity Forum:
+User support is provided on Audacity Forum:
 https://forum.audacityteam.org/ .
 
 We welcome feedback on Audacity, suggestions for new or improved features, 
@@ -116,7 +116,9 @@ Bug Fixes
    * Wave Color not grayed out in TCP dropdown menu when in Spectrogram view
    * Hover indication on note track channel toggle appears on all tracks (when 
      they rerender)
-   * Installer has old logo for 2.2.1 and 2.2.0 
+   * Installer has old logo for 2.2.1 and 2.2.0
+   * Un-muting with a single track unnecessarily activates the Solo button
+   * Applying chain to file should zoom-to-fit
    
  See also: https://wiki.audacityteam.org/wiki/Release_Notes_2.2.2
  and: https://wiki.audacityteam.org/wiki/New_features_in_Audacity_2.2.2

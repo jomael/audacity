@@ -58,7 +58,7 @@ EffectNormalize::~EffectNormalize()
 
 // IdentInterface implementation
 
-wxString EffectNormalize::GetSymbol()
+IdentInterfaceSymbol EffectNormalize::GetSymbol()
 {
    return NORMALIZE_PLUGIN_SYMBOL;
 }
@@ -73,7 +73,7 @@ wxString EffectNormalize::ManualPage()
    return wxT("Normalize");
 }
 
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 
 EffectType EffectNormalize::GetType()
 {
@@ -81,8 +81,15 @@ EffectType EffectNormalize::GetType()
 }
 
 // EffectClientInterface implementation
+bool EffectNormalize::DefineParams( ShuttleParams & S ){
+   S.SHUTTLE_PARAM( mLevel, Level );
+   S.SHUTTLE_PARAM( mGain, ApplyGain );
+   S.SHUTTLE_PARAM( mDC, RemoveDC );
+   S.SHUTTLE_PARAM( mStereoInd, StereoInd );
+   return true;
+}
 
-bool EffectNormalize::GetAutomationParameters(EffectAutomationParameters & parms)
+bool EffectNormalize::GetAutomationParameters(CommandParameters & parms)
 {
    parms.Write(KEY_Level, mLevel);
    parms.Write(KEY_ApplyGain, mGain);
@@ -92,7 +99,7 @@ bool EffectNormalize::GetAutomationParameters(EffectAutomationParameters & parms
    return true;
 }
 
-bool EffectNormalize::SetAutomationParameters(EffectAutomationParameters & parms)
+bool EffectNormalize::SetAutomationParameters(CommandParameters & parms)
 {
    ReadAndVerifyDouble(Level);
    ReadAndVerifyBool(ApplyGain);
@@ -292,7 +299,7 @@ void EffectNormalize::PopulateOrExchange(ShuttleGui & S)
                                              mGain ? wxT("true") : wxT("false"));
                mGainCheckBox->SetValidator(wxGenericValidator(&mGain));
 
-               FloatingPointValidator<double> vldLevel(2, &mLevel, NUM_VAL_ONE_TRAILING_ZERO);
+               FloatingPointValidator<double> vldLevel(2, &mLevel, NumValidatorStyle::ONE_TRAILING_ZERO);
                vldLevel.SetRange(MIN_Level, MAX_Level);
                mLevelTextCtrl = S.AddTextBox( {}, wxT(""), 10);
                mLevelTextCtrl->SetName(_("Maximum amplitude dB"));
@@ -405,6 +412,9 @@ bool EffectNormalize::AnalyseDC(const WaveTrack * track, const wxString &msg,
    mSum = 0.0; // dc offset inits
    mCount = 0;
 
+   sampleCount blockSamples;
+   sampleCount totalSamples = 0;
+
    //Go through the track one buffer at a time. s counts which
    //sample the current buffer starts at.
    auto s = start;
@@ -417,7 +427,8 @@ bool EffectNormalize::AnalyseDC(const WaveTrack * track, const wxString &msg,
       );
 
       //Get the samples from the track and put them in the buffer
-      track->Get((samplePtr) buffer.get(), floatSample, s, block);
+      track->Get((samplePtr) buffer.get(), floatSample, s, block, fillZero, true, &blockSamples);
+      totalSamples += blockSamples;
 
       //Process the buffer.
       AnalyzeData(buffer.get(), block);
@@ -432,8 +443,10 @@ bool EffectNormalize::AnalyseDC(const WaveTrack * track, const wxString &msg,
          break;
       }
    }
-
-   offset = -mSum / mCount.as_double();  // calculate actual offset (amount that needs to be added on)
+   if( totalSamples > 0 )
+      offset = -mSum / totalSamples.as_double();  // calculate actual offset (amount that needs to be added on)
+   else
+      offset = 0.0;
 
    //Return true because the effect processing succeeded ... unless cancelled
    return rc;

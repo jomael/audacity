@@ -109,9 +109,7 @@ class ToolBar /* not final */ : public wxPanelWrapper
    wxString GetSection();
    ToolDock *GetDock();
 
-   void SetLabel(const wxString & label);
-   void SetDock( ToolDock *dock);
-
+   void SetLabel(const wxString & label) override;
    void SetDocked(ToolDock *dock, bool pushed);
 
    // NEW virtual:
@@ -156,16 +154,12 @@ class ToolBar /* not final */ : public wxPanelWrapper
                             teBmps eDisabled,
                             wxSize size);
 
-   using LocalizedCommandName = std::pair<wxString, const wxChar*>;
-   using LocalizedCommandNameVector = std::vector<LocalizedCommandName>;
    static
    void SetButtonToolTip
       (AButton &button,
-       // An array of paired user-visible strings, and
-       // non-user-visible command names.  If a shortcut key is defined
-       // for the command, then it is appended, parenthesized, after the
-       // user-visible string.
-       const LocalizedCommandNameVector &commands);
+       // If a shortcut key is defined for the command, then it is appended,
+       // parenthesized, after the translated name.
+       const TranslatedInternalString commands[], size_t nCommands);
 
  protected:
    void SetButton(bool down, AButton *button);

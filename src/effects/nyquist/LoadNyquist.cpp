@@ -101,17 +101,12 @@ wxString NyquistEffectsModule::GetPath()
    return mPath;
 }
 
-wxString NyquistEffectsModule::GetSymbol()
+IdentInterfaceSymbol NyquistEffectsModule::GetSymbol()
 {
    return XO("Nyquist Effects");
 }
 
-wxString NyquistEffectsModule::GetName()
-{
-   return GetSymbol();
-}
-
-wxString NyquistEffectsModule::GetVendor()
+IdentInterfaceSymbol NyquistEffectsModule::GetVendor()
 {
    return XO("The Audacity Team");
 }
@@ -186,6 +181,12 @@ bool NyquistEffectsModule::AutoRegisterPlugins(PluginManagerInterface & pm)
       DiscoverPluginsAtPath(NYQUIST_PROMPT_ID, ignoredErrMsg,
          PluginManagerInterface::DefaultRegistrationCallback);
    }
+   if (!pm.IsPluginRegistered(NYQUIST_TOOLS_PROMPT_ID))
+   {
+      // No checking of error ?
+      DiscoverPluginsAtPath(NYQUIST_TOOLS_PROMPT_ID, ignoredErrMsg,
+         PluginManagerInterface::DefaultRegistrationCallback);
+   }
 
    for (size_t i = 0; i < WXSIZEOF(kShippedEffects); i++)
    {
@@ -213,6 +214,7 @@ wxArrayString NyquistEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
 
    // Add the Nyquist prompt effect
    files.Add(NYQUIST_PROMPT_ID);
+   files.Add(NYQUIST_TOOLS_PROMPT_ID);
    
    // Load .ny plug-ins
    pm.FindFilesInPathList(wxT("*.ny"), pathList, files);
@@ -243,11 +245,9 @@ bool NyquistEffectsModule::IsPluginValid(const wxString & path, bool bFast)
 {
    // Ignores bFast parameter, since checking file exists is fast enough for
    // the small number of Nyquist plug-ins that we have.
-   bFast;
-   if (path == NYQUIST_PROMPT_ID)
-   {
+   static_cast<void>(bFast);
+   if((path == NYQUIST_PROMPT_ID) ||  (path == NYQUIST_TOOLS_PROMPT_ID))
       return true;
-   }
 
    return wxFileName::FileExists(path);
 }

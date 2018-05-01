@@ -38,7 +38,7 @@ EffectReverse::~EffectReverse()
 
 // IdentInterface implementation
 
-wxString EffectReverse::GetSymbol()
+IdentInterfaceSymbol EffectReverse::GetSymbol()
 {
    return REVERSE_PLUGIN_SYMBOL;
 }
@@ -48,7 +48,7 @@ wxString EffectReverse::GetDescription()
    return _("Reverses the selected audio");
 }
 
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 
 EffectType EffectReverse::GetType()
 {

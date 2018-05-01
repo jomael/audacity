@@ -110,7 +110,7 @@ EffectNoiseRemoval::~EffectNoiseRemoval()
 
 // IdentInterface implementation
 
-wxString EffectNoiseRemoval::GetSymbol()
+IdentInterfaceSymbol EffectNoiseRemoval::GetSymbol()
 {
    return XO("Noise Removal");
 }
@@ -120,7 +120,7 @@ wxString EffectNoiseRemoval::GetDescription()
    return _("Removes constant background noise such as fans, tape noise, or hums");
 }
 
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 
 EffectType EffectNoiseRemoval::GetType()
 {

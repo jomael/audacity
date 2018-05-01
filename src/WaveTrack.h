@@ -74,6 +74,12 @@ class AUDACITY_DLL_API WaveTrack final : public PlayableTrack {
 
    void Init(const WaveTrack &orig);
 
+public:
+   // overwrite data excluding the sample sequence but including display
+   // settings
+   void Reinit(const WaveTrack &orig);
+
+private:
    Track::Holder Duplicate() const override;
 
    friend class TrackFactory;
@@ -99,14 +105,14 @@ class AUDACITY_DLL_API WaveTrack final : public PlayableTrack {
     *
     * @return time in seconds, or zero if there are no clips in the track
     */
-   double GetStartTime() const;
+   double GetStartTime() const override;
 
    /** @brief Get the time at which the last clip in the track ends, plus
     * recorded stuff
     *
     * @return time in seconds, or zero if there are no clips in the track.
     */
-   double GetEndTime() const;
+   double GetEndTime() const override;
 
    //
    // Identifying the type of track
@@ -132,7 +138,7 @@ class AUDACITY_DLL_API WaveTrack final : public PlayableTrack {
    // Takes gain and pan into account
    float GetChannelGain(int channel) const;
 
-   void SetMinimized(bool isMinimized) override;
+   void DoSetMinimized(bool isMinimized) override;
 
    int GetWaveColorIndex() const { return mWaveColorIndex; };
    void SetWaveColorIndex(int colorIndex);
@@ -149,7 +155,7 @@ class AUDACITY_DLL_API WaveTrack final : public PlayableTrack {
    WaveformSettings &GetWaveformSettings();
    WaveformSettings &GetIndependentWaveformSettings();
    void SetWaveformSettings(std::unique_ptr<WaveformSettings> &&pSettings);
-
+   void UseSpectralPrefs( bool bUse=true );
    //
    // High-level editing
    //
@@ -247,7 +253,7 @@ class AUDACITY_DLL_API WaveTrack final : public PlayableTrack {
    ///
    bool Get(samplePtr buffer, sampleFormat format,
                    sampleCount start, size_t len,
-                   fillFormat fill = fillZero, bool mayThrow = true) const;
+                   fillFormat fill = fillZero, bool mayThrow = true, sampleCount * pNumCopied = nullptr) const;
    void Set(samplePtr buffer, sampleFormat format,
                    sampleCount start, size_t len);
 
@@ -521,7 +527,9 @@ class AUDACITY_DLL_API WaveTrack final : public PlayableTrack {
    // and will be taken out of the WaveTrack class:
    //
 
-   enum WaveTrackDisplay {
+
+   typedef int WaveTrackDisplay;
+   enum WaveTrackDisplayValues : int {
 
       // DO NOT REORDER OLD VALUES!  Replace obsoletes with placeholders.
 
@@ -558,14 +566,17 @@ class AUDACITY_DLL_API WaveTrack final : public PlayableTrack {
       kZoomDefault,
       kZoomMinutes,
       kZoomSeconds,
+      kZoom5ths,
+      kZoom10ths,
+      kZoom20ths,
+      kZoom50ths,
+      kZoom100ths,
+      kZoom500ths,
       kZoomMilliSeconds,
       kZoomSamples,
       kZoom4To1,
       kMaxZoom,
    };
-
-   // Read appropriate value from preferences
-   static WaveTrackDisplay FindDefaultViewMode();
 
    // Handle remapping of enum values from 2.1.0 and earlier
    static WaveTrackDisplay ConvertLegacyDisplayValue(int oldValue);

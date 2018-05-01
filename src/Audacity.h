@@ -39,7 +39,7 @@
 // Its value may be more than 0 for pre-release "Beta" builds that differ only
 // in the welcome screen, and hiding of some development menu commands, but
 // still link to the alpha manual online.
-#define AUDACITY_BUILD_LEVEL 1
+#define AUDACITY_BUILD_LEVEL 0
 
 // used #ifdef not #if for IS_ALPHA, IS_BETA, IS_RELEASE, USE_ALPHA_MANUAL
 #undef IS_ALPHA
@@ -61,8 +61,8 @@
 
 // Increment as appropriate every time we release a NEW version.
 #define AUDACITY_VERSION   2
-#define AUDACITY_RELEASE   2
-#define AUDACITY_REVISION  2
+#define AUDACITY_RELEASE   3
+#define AUDACITY_REVISION  0
 #define AUDACITY_MODLEVEL  0
 
 #if defined(IS_BETA)
@@ -124,7 +124,11 @@ void QuitAudacity();
 #endif
 
 #ifdef __WXGTK__
-#include "configunix.h"
+#ifndef __CONFIG_UNIX_INCLUDED
+   #define __CONFIG_UNIX_INCLUDED
+   #include "configunix.h"
+#endif
+
 // Some systems do not restrict the path length and therefore PATH_MAX is undefined
 #ifdef PATH_MAX
 #undef PLATFORM_MAX_PATH
@@ -133,7 +137,10 @@ void QuitAudacity();
 #endif
 
 #ifdef __WXX11__
-#include "configunix.h"
+#ifndef __CONFIG_UNIX_INCLUDED
+   #define __CONFIG_UNIX_INCLUDED
+   #include "configunix.h"
+#endif
 // wxX11 should also get the platform-specific definition of PLATFORM_MAX_PATH, so do not declare here.
 #endif
 

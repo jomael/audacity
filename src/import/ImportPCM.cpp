@@ -38,6 +38,7 @@
 
 #include "../ondemand/ODManager.h"
 #include "../ondemand/ODComputeSummaryTask.h"
+#include "../prefs/QualityPrefs.h"
 
 //If OD is enabled, he minimum number of samples a file has to use it.
 //Otherwise, we use the older PCMAliasBlockFile method since it should be fast enough.
@@ -79,8 +80,8 @@ public:
 
    ~PCMImportPlugin() { }
 
-   wxString GetPluginStringID() { return wxT("libsndfile"); }
-   wxString GetPluginFormatDescription();
+   wxString GetPluginStringID() override { return wxT("libsndfile"); }
+   wxString GetPluginFormatDescription() override;
    std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
 };
 
@@ -204,8 +205,7 @@ PCMImportFileHandle::PCMImportFileHandle(wxString name,
    // the quality of the original file.
    //
 
-   mFormat = (sampleFormat)
-      gPrefs->Read(wxT("/SamplingRate/DefaultProjectSampleFormat"), floatSample);
+   mFormat = QualityPrefs::SampleFormatChoice();
 
    if (mFormat != floatSample &&
        sf_subtype_more_than_16_bits(mInfo.format))

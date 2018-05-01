@@ -96,19 +96,14 @@ wxString VampEffect::GetPath()
    return mPath;
 }
 
-wxString VampEffect::GetSymbol()
+IdentInterfaceSymbol VampEffect::GetSymbol()
 {
    return mName;
 }
 
-wxString VampEffect::GetName()
+IdentInterfaceSymbol VampEffect::GetVendor()
 {
-   return GetSymbol();
-}
-
-wxString VampEffect::GetVendor()
-{
-   return wxString::FromUTF8(mPlugin->getMaker().c_str());
+   return { wxString::FromUTF8(mPlugin->getMaker().c_str()) };
 }
 
 wxString VampEffect::GetVersion()
@@ -122,7 +117,7 @@ wxString VampEffect::GetDescription()
 }
 
 // ============================================================================
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 // ============================================================================
 
 EffectType VampEffect::GetType()
@@ -130,7 +125,7 @@ EffectType VampEffect::GetType()
    return EffectTypeAnalyze;
 }
 
-wxString VampEffect::GetFamily()
+IdentInterfaceSymbol VampEffect::GetFamilyId()
 {
    return VAMPEFFECTS_FAMILY;
 }
@@ -153,7 +148,7 @@ unsigned VampEffect::GetAudioInCount()
    return mPlugin->getMaxChannelCount();
 }
 
-bool VampEffect::GetAutomationParameters(EffectAutomationParameters & parms)
+bool VampEffect::GetAutomationParameters(CommandParameters & parms)
 {
    for (size_t p = 0, cnt = mParameters.size(); p < cnt; p++)
    {
@@ -175,7 +170,7 @@ bool VampEffect::GetAutomationParameters(EffectAutomationParameters & parms)
                mParameters[p].quantizeStep == 1.0 &&
                !mParameters[p].valueNames.empty())
       {
-         wxArrayString choices;
+         std::vector<IdentInterfaceSymbol> choices;
          int val = 0;
 
          for (size_t i = 0, cnt = mParameters[p].valueNames.size(); i < cnt; i++)
@@ -185,10 +180,10 @@ bool VampEffect::GetAutomationParameters(EffectAutomationParameters & parms)
             {
                val = i;
             }
-            choices.Add(choice);
+            choices.push_back(choice);
          }
 
-         parms.WriteEnum(key, val, choices);
+         parms.WriteEnum(key, val, choices.data(), choices.size());
       }
       else
       {
@@ -199,7 +194,7 @@ bool VampEffect::GetAutomationParameters(EffectAutomationParameters & parms)
    return true;
 }
 
-bool VampEffect::SetAutomationParameters(EffectAutomationParameters & parms)
+bool VampEffect::SetAutomationParameters(CommandParameters & parms)
 {
    // First pass verifies values
    for (size_t p = 0, cnt = mParameters.size(); p < cnt; p++)
@@ -222,16 +217,16 @@ bool VampEffect::SetAutomationParameters(EffectAutomationParameters & parms)
                mParameters[p].quantizeStep == 1.0 &&
                !mParameters[p].valueNames.empty())
       {
-         wxArrayString choices;
+         std::vector<IdentInterfaceSymbol> choices;
          int val;
 
          for (size_t i = 0, cnt = mParameters[p].valueNames.size(); i < cnt; i++)
          {
             wxString choice = wxString::FromUTF8(mParameters[p].valueNames[i].c_str());
-            choices.Add(choice);
+            choices.push_back(choice);
          }
 
-         good = parms.ReadEnum(key, &val, choices) && val != wxNOT_FOUND;
+         good = parms.ReadEnum(key, &val, choices.data(), choices.size()) && val != wxNOT_FOUND;
       }
       else
       {
@@ -268,16 +263,16 @@ bool VampEffect::SetAutomationParameters(EffectAutomationParameters & parms)
                mParameters[p].quantizeStep == 1.0 &&
                !mParameters[p].valueNames.empty())
       {
-         wxArrayString choices;
-         int val;
+         std::vector<IdentInterfaceSymbol> choices;
+         int val = 0;
 
          for (size_t i = 0, cnt = mParameters[p].valueNames.size(); i < cnt; i++)
          {
             wxString choice = wxString::FromUTF8(mParameters[p].valueNames[i].c_str());
-            choices.Add(choice);
+            choices.push_back(choice);
          }
 
-         parms.ReadEnum(key, &val, choices);
+         parms.ReadEnum(key, &val, choices.data(), choices.size());
 
          mPlugin->setParameter(mParameters[p].identifier, (float) val);
       }
@@ -442,10 +437,11 @@ bool VampEffect::Process()
          }
       }
 
+      const auto effectName = GetSymbol().Translation();
       addedTracks.push_back(AddAnalysisTrack(
          multiple
-         ? wxString::Format(_("%s: %s"), left->GetName(), GetName())
-         : GetName()
+         ? wxString::Format( _("%s: %s"), left->GetName(), effectName )
+         : effectName
       ));
       LabelTrack *ltrack = addedTracks.back()->get();
 
@@ -671,9 +667,9 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
                   vld.SetRange(mParameters[p].minValue, mParameters[p].maxValue);
 
                   float range = mParameters[p].maxValue - mParameters[p].minValue;
-                  int style = range < 10 ? NUM_VAL_THREE_TRAILING_ZEROES :
-                              range < 100 ? NUM_VAL_TWO_TRAILING_ZEROES :
-                              NUM_VAL_ONE_TRAILING_ZERO;
+                  auto style = range < 10 ? NumValidatorStyle::THREE_TRAILING_ZEROES :
+                              range < 100 ? NumValidatorStyle::TWO_TRAILING_ZEROES :
+                              NumValidatorStyle::ONE_TRAILING_ZERO;
                   vld.SetStyle(style);
 
                   S.Id(ID_Texts + p);

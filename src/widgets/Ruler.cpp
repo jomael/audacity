@@ -97,6 +97,7 @@ array of Ruler::Label.
 #include "../prefs/TracksPrefs.h"
 #include "../prefs/TracksBehaviorsPrefs.h"
 #include "../widgets/Grabber.h"
+#include "../commands/CommandContext.h"
 
 //#define SCRUB_ABOVE
 
@@ -138,6 +139,7 @@ Ruler::Ruler()
    mbTicksAtExtremes = false;
    mTickColour = wxColour( theTheme.Colour( clrTrackPanelText ));
    mPen.SetColour(mTickColour);
+   mDbMirrorValue = 0.0;
 
    // Note: the font size is now adjusted automatically whenever
    // Invalidate is called on a horizontal Ruler, unless the user
@@ -395,9 +397,11 @@ void Ruler::FindLinearTickSizes(double UPP)
 
    double d;
 
-   // As a heuristic, we want at least 16 pixels
-   // between each minor tick
-   double units = 16 * fabs(UPP);
+   // As a heuristic, we want at least 22 pixels between each 
+   // minor tick.  We want to show numbers like "-48"
+   // in that space.
+   // If vertical, we don't need as much space.
+   double units = ((mOrientation == wxHORIZONTAL) ? 22 : 16) * fabs(UPP);
 
    mDigits = 0;
 
@@ -767,7 +771,7 @@ void Ruler::Tick(int pos, double d, bool major, bool minor)
    wxCoord strW, strH, strD, strL;
    int strPos, strLen, strLeft, strTop;
 
-   // FIXME: We don't draw a tick if of end of our label arrays
+   // FIXME: We don't draw a tick if off end of our label arrays
    // But we shouldn't have an array of labels.
    if( mNumMinorMinor >= mLength )
       return;
@@ -791,6 +795,9 @@ void Ruler::Tick(int pos, double d, bool major, bool minor)
    label->text = wxT("");
 
    mDC->SetFont(major? *mMajorFont: minor? *mMinorFont : *mMinorMinorFont);
+   // Bug 521.  dB view for waveforms needs a 2-sided scale.
+   if(( mDbMirrorValue > 1.0 ) && ( -d > mDbMirrorValue ))
+      d = -2*mDbMirrorValue - d;
    l = LabelString(d, major);
    mDC->GetTextExtent(l, &strW, &strH, &strD, &strL);
 
@@ -1133,6 +1140,7 @@ void Ruler::Update(const TimeTrack* timetrack)// Envelope *speedEnv, long minSpe
 
       double sg = UPP > 0.0? 1.0: -1.0;
 
+      int nDroppedMinorLabels=0;
       // Major and minor ticks
       for (int jj = 0; jj < 2; ++jj) {
          const double denom = jj == 0 ? mMajor : mMinor;
@@ -1176,8 +1184,16 @@ void Ruler::Update(const TimeTrack* timetrack)// Envelope *speedEnv, long minSpe
                step = floor(sg * warpedD / denom);
                bool major = jj == 0;
                Tick(i, sg * step * denom, major, !major);
+               if( !major && mMinorLabels[mNumMinor-1].text.IsEmpty() ){
+                  nDroppedMinorLabels++;
+               }
             }
          }
+         // If we've dropped minor labels through overcrowding, then don't show
+         // any of them.  We're allowed though to drop ones which correspond to the
+         // major numbers.
+         if( nDroppedMinorLabels > (mNumMajor+ (mLabelEdges ? 2:0)) )
+            mNumMinor = 0;
       }
 
       // Left and Right Edges
@@ -1606,10 +1622,37 @@ END_EVENT_TABLE()
 IMPLEMENT_CLASS(RulerPanel, wxPanelWrapper)
 
 RulerPanel::RulerPanel(wxWindow* parent, wxWindowID id,
+                       wxOrientation orientation,
+                       const wxSize &bounds,
+                       const Range &range,
+                       Ruler::RulerFormat format,
+                       const wxString &units,
+                       const Options &options,
                        const wxPoint& pos /*= wxDefaultPosition*/,
                        const wxSize& size /*= wxDefaultSize*/):
    wxPanelWrapper(parent, id, pos, size)
 {
+   ruler.SetBounds( 0, 0, bounds.x, bounds.y );
+   ruler.SetOrientation(orientation);
+   ruler.SetRange( range.first, range.second );
+   ruler.SetLog( options.log );
+   ruler.SetFormat(format);
+   ruler.SetUnits( units );
+   ruler.SetFlip( options.flip );
+   ruler.SetLabelEdges( options.labelEdges );
+   ruler.mbTicksAtExtremes = options.ticksAtExtremes;
+   if (orientation == wxVERTICAL) {
+      wxCoord w;
+      ruler.GetMaxSize(&w, NULL);
+      SetMinSize(wxSize(w, 150));  // height needed for wxGTK
+   }
+   else if (orientation == wxHORIZONTAL) {
+      wxCoord h;
+      ruler.GetMaxSize(NULL, &h);
+      SetMinSize(wxSize(wxDefaultCoord, h));
+   }
+   if (options.hasTickColour)
+      ruler.SetTickColour( options.tickColour );
 }
 
 RulerPanel::~RulerPanel()
@@ -1994,9 +2037,8 @@ AdornedRulerPanel::AdornedRulerPanel(AudacityProject* project,
    wxToolTip::Enable(true);
 #endif
 
-   wxTheApp->Connect(EVT_AUDIOIO_CAPTURE,
-                     wxCommandEventHandler(AdornedRulerPanel::OnCapture),
-                     NULL,
+   wxTheApp->Bind(EVT_AUDIOIO_CAPTURE,
+                     &AdornedRulerPanel::OnCapture,
                      this);
 }
 
@@ -2004,11 +2046,6 @@ AdornedRulerPanel::~AdornedRulerPanel()
 {
    if(HasCapture())
       ReleaseMouse();
-
-   wxTheApp->Disconnect(EVT_AUDIOIO_CAPTURE,
-                        wxCommandEventHandler(AdornedRulerPanel::OnCapture),
-                        NULL,
-                        this);
 }
 
 #if 1
@@ -2614,7 +2651,7 @@ void AdornedRulerPanel::HandleQPDrag(wxMouseEvent &/*event*/, wxCoord mousePosX)
       case mesDraggingPlayRegionStart:
          HideQuickPlayIndicator();
 
-         // Don't start dragging until beyond tollerance initial playback start
+         // Don't start dragging until beyond tolerance initial playback start
          if (!mIsDragging && isWithinStart)
             mQuickPlayPos = mOldPlayRegionStart;
          else
@@ -2875,9 +2912,8 @@ void AdornedRulerPanel::UpdateButtonStates()
 {
    auto common = [this]
    (AButton &button, const wxString &commandName, const wxString &label) {
-      CommandManager::LocalizedCommandNameVector commands( 1u,
-         { label, commandName } );
-      ToolBar::SetButtonToolTip(button, commands);
+      TranslatedInternalString command{ commandName, label };
+      ToolBar::SetButtonToolTip( button, &command, 1u );
       button.SetLabel(button.GetToolTipText());
 
       button.UpdateStatus();
@@ -3054,8 +3090,8 @@ void AdornedRulerPanel::DoDrawPlayRegion(wxDC * dc)
 
    if (start >= 0)
    {
-      const int x1 = Time2Pos(start) + 1;
-      const int x2 = Time2Pos(end);
+      const int x1 = Time2Pos(start);
+      const int x2 = Time2Pos(end)-2;
       int y = mInner.y - TopMargin + mInner.height/2;
 
       bool isLocked = mProject->IsPlayRegionLocked();
@@ -3181,8 +3217,8 @@ void AdornedRulerPanel::DrawSelection()
 void AdornedRulerPanel::DoDrawSelection(wxDC * dc)
 {
    // Draw selection
-   const int p0 = 1 + max(0, Time2Pos(mViewInfo->selectedRegion.t0()));
-   const int p1 = 2 + min(mInner.width, Time2Pos(mViewInfo->selectedRegion.t1()));
+   const int p0 = max(1, Time2Pos(mViewInfo->selectedRegion.t0()));
+   const int p1 = min(mInner.width, Time2Pos(mViewInfo->selectedRegion.t1()));
 
    dc->SetBrush( wxBrush( theTheme.Colour( clrRulerBackground )) );
    dc->SetPen(   wxPen(   theTheme.Colour( clrRulerBackground )) );

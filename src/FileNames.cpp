@@ -190,9 +190,15 @@ wxString FileNames::HtmlHelpDir()
 #endif
 }
 
-wxString FileNames::ChainDir()
+wxString FileNames::LegacyChainDir()
 {
-   return FileNames::MkDir( wxFileName( DataDir(), wxT("Chains") ).GetFullPath() );
+   // Don't force creation of it
+   return wxFileName{ DataDir(), wxT("Chains") }.GetFullPath();
+}
+
+wxString FileNames::MacroDir()
+{
+   return FileNames::MkDir( wxFileName( DataDir(), wxT("Macros") ).GetFullPath() );
 }
 
 wxString FileNames::NRPDir()

@@ -1638,8 +1638,8 @@ void LabelTrack::HandleTextClick(const wxMouseEvent & evt,
    const wxRect & r, const ZoomInfo &zoomInfo,
    SelectedRegion *newSel)
 {
-   r;//compiler food.
-   zoomInfo;//compiler food.
+   static_cast<void>(r);//compiler food.
+   static_cast<void>(zoomInfo);//compiler food.
    if (evt.ButtonDown())
    {
 
@@ -1743,6 +1743,11 @@ bool LabelTrack::DoCaptureKey(wxKeyEvent & event)
       if (IsGoodLabelFirstKey(event) && typeToCreateLabel) {
          AudacityProject * pProj = GetActiveProject();
 
+
+// The commented out code can prevent label creation, causing bug 1551
+// We should only be in DoCaptureKey IF this label track has focus,
+// and in that case creating a Label is the expected/intended thing.
+#if 0
          // If we're playing, don't capture if the selection is the same as the
          // playback region (this helps prevent label track creation from
          // stealing unmodified kbd. shortcuts)
@@ -1756,6 +1761,7 @@ bool LabelTrack::DoCaptureKey(wxKeyEvent & event)
                return false;
             }
          }
+#endif
 
          // If there's a label there already don't capture
          if( GetLabelIndex(pProj->mViewInfo.selectedRegion.t0(),
@@ -1803,7 +1809,7 @@ unsigned LabelTrack::KeyDown(wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *W
       bkpSel1 != viewInfo.selectedRegion.t1())
       return RefreshCode::RefreshAll;
    else if (!event.GetSkipped())
-      return RefreshCode::RefreshCell;
+      return  RefreshCode::RefreshCell;
 
    return RefreshCode::RefreshNone;
 }
@@ -2166,6 +2172,7 @@ void LabelTrack::ShowContextMenu()
       int x = 0;
       bool success = CalcCursorX(&x);
       wxASSERT(success);
+      static_cast<void>(success); // Suppress unused variable warning if debug mode is disabled
 
       parent->PopupMenu(&menu, x, ls->y + (mIconHeight / 2) - 1);
    }
@@ -2724,7 +2731,11 @@ int LabelTrack::AddLabel(const SelectedRegion &selectedRegion,
 
    mLabels.insert(mLabels.begin() + pos, l);
 
-   if( restoreFocus == -1 )
+   // restoreFocus is -2 e.g. from Nyquist label creation, when we should not
+   // even lose the focus and open the label to edit in the first place.
+   // -1 means we don't need to restore it to anywhere.
+   // 0 or above is the track to restore to afetr editing the label is complete.
+   if( restoreFocus >= -1 )
       mSelIndex = pos;
 
    // Make sure the caret is visible

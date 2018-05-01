@@ -28,8 +28,8 @@
 #include "../Prefs.h"
 #include "../Internat.h"
 
-PlaybackPrefs::PlaybackPrefs(wxWindow * parent)
-:  PrefsPanel(parent, _("Playback"))
+PlaybackPrefs::PlaybackPrefs(wxWindow * parent, wxWindowID winid)
+:  PrefsPanel(parent, winid, _("Playback"))
 {
    Populate();
 }
@@ -65,7 +65,7 @@ void PlaybackPrefs::PopulateOrExchange(ShuttleGui & S)
                                  6.0,
                                  9);
          S.AddUnits(_("seconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
       }
       S.EndThreeColumn();
    }
@@ -81,14 +81,14 @@ void PlaybackPrefs::PopulateOrExchange(ShuttleGui & S)
                                  2.0,
                                  9);
          S.AddUnits(_("seconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
 
          w = S.TieNumericTextBox(_("&After cut region:"),
                                  wxT("/AudioIO/CutPreviewAfterLen"),
                                  1.0,
                                  9);
          S.AddUnits(_("seconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
       }
       S.EndThreeColumn();
    }
@@ -103,14 +103,14 @@ void PlaybackPrefs::PopulateOrExchange(ShuttleGui & S)
                                  1.0,
                                  9);
          S.AddUnits(_("seconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
 
          w = S.TieNumericTextBox(_("Lo&ng period:"),
                                  wxT("/AudioIO/SeekLongPeriod"),
                                  15.0,
                                  9);
          S.AddUnits(_("seconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
       }
       S.EndThreeColumn();
    }
@@ -132,9 +132,9 @@ wxString PlaybackPrefs::HelpPageName()
    return "Playback_Preferences";
 }
 
-PrefsPanel *PlaybackPrefsFactory::Create(wxWindow *parent)
+PrefsPanel *PlaybackPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
-   return safenew PlaybackPrefs(parent);
+   return safenew PlaybackPrefs(parent, winid);
 }
 

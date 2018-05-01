@@ -40,6 +40,11 @@
 #include "widgets/NumericTextCtrl.h"
 #include "widgets/HelpSystem.h"
 #include "widgets/ErrorDialog.h"
+#include "commands/CommandContext.h"
+
+#if wxUSE_ACCESSIBILITY
+#include "widgets/WindowAccessible.h"
+#endif
 
 #define TIMER_ID 7000
 
@@ -92,10 +97,10 @@ static double wxDateTime_to_AudacityTime(wxDateTime& dateTime)
 
 #if wxUSE_ACCESSIBILITY
 
-class DatePickerCtrlAx final : public wxWindowAccessible
+class DatePickerCtrlAx final : public WindowAccessible
 {
 public:
-   DatePickerCtrlAx(wxDatePickerCtrl * ctrl) : wxWindowAccessible(ctrl), mCtrl(ctrl) {};
+   DatePickerCtrlAx(wxDatePickerCtrl * ctrl) : WindowAccessible(ctrl), mCtrl(ctrl) {};
 
    virtual ~ DatePickerCtrlAx() {};
 
@@ -792,7 +797,8 @@ void TimerRecordDialog::PopulateOrExchange(ShuttleGui& S)
          * The 'h' indicates the first number displayed is hours, the 'm' indicates the second number
          * displayed is minutes, and the 's' indicates that the third number displayed is seconds.
          */
-         wxString strFormat = _("099 h 060 m 060 s");
+         auto strFormat = _("099 h 060 m 060 s");
+         using Options = NumericTextCtrl::Options;
          S.StartStatic(_("Start Date and Time"), true);
          {
             m_pDatePickerCtrl_Start =
@@ -808,13 +814,14 @@ void TimerRecordDialog::PopulateOrExchange(ShuttleGui& S)
             S.AddWindow(m_pDatePickerCtrl_Start);
 
             m_pTimeTextCtrl_Start = safenew NumericTextCtrl(
-               NumericConverter::TIME, this, ID_TIMETEXT_START);
+               this, ID_TIMETEXT_START, NumericConverter::TIME,
+               {}, 0, 44100,
+               Options{}
+                  .MenuEnabled(false)
+                  .Format(strFormat)
+                  .Value(true, wxDateTime_to_AudacityTime(m_DateTime_Start)));
             m_pTimeTextCtrl_Start->SetName(_("Start Time"));
-            m_pTimeTextCtrl_Start->SetFormatString(strFormat);
-            m_pTimeTextCtrl_Start->
-               SetValue(wxDateTime_to_AudacityTime(m_DateTime_Start));
             S.AddWindow(m_pTimeTextCtrl_Start);
-            m_pTimeTextCtrl_Start->EnableMenu(false);
          }
          S.EndStatic();
 
@@ -836,12 +843,14 @@ void TimerRecordDialog::PopulateOrExchange(ShuttleGui& S)
             S.AddWindow(m_pDatePickerCtrl_End);
 
             m_pTimeTextCtrl_End = safenew NumericTextCtrl(
-               NumericConverter::TIME, this, ID_TIMETEXT_END);
+               this, ID_TIMETEXT_END, NumericConverter::TIME,
+               {}, 0, 44100,
+               Options{}
+                  .MenuEnabled(false)
+                  .Format(strFormat)
+                  .Value(true, wxDateTime_to_AudacityTime(m_DateTime_End)));
             m_pTimeTextCtrl_End->SetName(_("End Time"));
-            m_pTimeTextCtrl_End->SetFormatString(strFormat);
-            m_pTimeTextCtrl_End->SetValue(wxDateTime_to_AudacityTime(m_DateTime_End));
             S.AddWindow(m_pTimeTextCtrl_End);
-            m_pTimeTextCtrl_End->EnableMenu(false);
          }
          S.EndStatic();
 
@@ -855,13 +864,16 @@ void TimerRecordDialog::PopulateOrExchange(ShuttleGui& S)
             * number displayed is minutes, and the 's' indicates that the fourth number displayed is
             * seconds.
             */
-            wxString strFormat1 = _("099 days 024 h 060 m 060 s");
-            m_pTimeTextCtrl_Duration = safenew NumericTextCtrl(NumericConverter::TIME, this, ID_TIMETEXT_DURATION);
+            auto strFormat1 = _("099 days 024 h 060 m 060 s");
+            m_pTimeTextCtrl_Duration = safenew NumericTextCtrl(
+               this, ID_TIMETEXT_DURATION, NumericConverter::TIME,
+               {}, 0, 44100,
+               Options{}
+                  .MenuEnabled(false)
+                  .Format(strFormat1)
+                  .Value(true, m_TimeSpan_Duration.GetSeconds().ToDouble()));
             m_pTimeTextCtrl_Duration->SetName(_("Duration"));
-            m_pTimeTextCtrl_Duration->SetFormatString(strFormat1);
-            m_pTimeTextCtrl_Duration->SetValue(m_TimeSpan_Duration.GetSeconds().ToDouble());
             S.AddWindow(m_pTimeTextCtrl_Duration);
-            m_pTimeTextCtrl_Duration->EnableMenu(false);
          }
          S.EndStatic();
       }
@@ -911,23 +923,28 @@ void TimerRecordDialog::PopulateOrExchange(ShuttleGui& S)
          S.StartStatic(_("Options"), true);
          {
 
-            wxArrayString arrayOptions;
-            arrayOptions.Add(_("Do nothing"));
-            arrayOptions.Add(_("Exit Audacity"));
-            arrayOptions.Add(_("Restart system"));
-            arrayOptions.Add(_("Shutdown system"));
+            S.StartMultiColumn(1, wxEXPAND);
+            {
+               S.SetStretchyCol( 0 );
+               wxArrayString arrayOptions;
+               arrayOptions.Add(_("Do nothing"));
+               arrayOptions.Add(_("Exit Audacity"));
+               arrayOptions.Add(_("Restart system"));
+               arrayOptions.Add(_("Shutdown system"));
 
-            m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(0));
-            m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(1));
+               m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(0));
+               m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(1));
 #ifdef __WINDOWS__
-            m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(2));
-            m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(3));
+               m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(2));
+               m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(3));
 #endif
-            m_sTimerAfterCompleteOption = arrayOptions.Item(iPostTimerRecordAction);
+               m_sTimerAfterCompleteOption = arrayOptions.Item(iPostTimerRecordAction);
 
-            m_pTimerAfterCompleteChoiceCtrl = S.AddChoice(_("After Recording completes:"),
-                                                          m_sTimerAfterCompleteOption,
-                                                          &m_sTimerAfterCompleteOptionsArray);
+               m_pTimerAfterCompleteChoiceCtrl = S.AddChoice(_("After Recording completes:"),
+                                                             m_sTimerAfterCompleteOption,
+                                                             &m_sTimerAfterCompleteOptionsArray);
+            }
+            S.EndMultiColumn();
          }
          S.EndStatic();
 
@@ -1052,7 +1069,7 @@ ProgressResult TimerRecordDialog::WaitForStart()
    while (updateResult == ProgressResult::Success && !bIsRecording)
    {
       updateResult = progress.UpdateProgress();
-      wxMilliSleep(10);
+      wxMilliSleep(kTimerInterval);
       bIsRecording = (m_DateTime_Start <= wxDateTime::UNow());
    }
    return updateResult;
@@ -1099,7 +1116,7 @@ ProgressResult TimerRecordDialog::PreActionDelay(int iActionIndex, TimerRecordCo
    while (iUpdateResult == ProgressResult::Success && !bIsTime)
    {
       iUpdateResult = dlgAction.UpdateProgress();
-      wxMilliSleep(10);
+      wxMilliSleep(kTimerInterval);
       bIsTime = (dtActionTime <= wxDateTime::UNow());
    }
    return iUpdateResult;

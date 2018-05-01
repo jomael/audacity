@@ -63,12 +63,11 @@ class ODLock;
 class RecordingRecoveryHandler;
 class TrackList;
 class Tags;
-class EffectPlugs;
 
 class TrackPanel;
 class FreqWindow;
 class ContrastDialog;
-class Meter;
+class MeterPanel;
 
 // toolbar classes
 class ControlToolBar;
@@ -87,6 +86,7 @@ class TranscriptionToolBar;
 // windows and frames
 class AdornedRulerPanel;
 class HistoryWindow;
+class MacrosWindow;
 class LyricsWindow;
 class MixerBoard;
 class MixerBoardFrame;
@@ -104,6 +104,7 @@ class Track;
 class WaveClip;
 class BackgroundCell;
 
+
 AudacityProject *CreateNewAudacityProject();
 AUDACITY_DLL_API AudacityProject *GetActiveProject();
 void RedrawAllProjects();
@@ -120,8 +121,6 @@ using AProjectArray = std::vector< AProjectHolder >;
 
 extern AProjectArray gAudacityProjects;
 
-
-WX_DEFINE_ARRAY(wxMenu *, MenuArray);
 
 enum class PlayMode : int {
    normalPlay,
@@ -157,6 +156,22 @@ class ImportXMLTagHandler final : public XMLTagHandler
  private:
    AudacityProject* mProject;
 };
+
+class EffectPlugs;
+typedef wxArrayString PluginIDList;
+class CommandContext;
+class CommandManager;
+class Track;
+class TrackHolder;
+class TrackList;
+class WaveClip;
+class WaveTrack;
+
+#include "./commands/CommandFlag.h"
+#include "../include/audacity/EffectInterface.h"
+
+#include "./commands/CommandManager.h"
+
 
 class AUDACITY_DLL_API AudacityProject final : public wxFrame,
                                      public TrackPanelListener,
@@ -211,7 +226,7 @@ class AUDACITY_DLL_API AudacityProject final : public wxFrame,
    bool IsAudioActive() const;
    void SetAudioIOToken(int token);
 
-   bool IsActive();
+   bool IsActive() override;
 
    // File I/O
 
@@ -424,16 +439,16 @@ public:
 
    // Selection Format
 
-   void SetSelectionFormat(const wxString & format);
-   const wxString & GetSelectionFormat() const;
+   void SetSelectionFormat(const NumericFormatId & format);
+   const NumericFormatId & GetSelectionFormat() const;
 
    // Spectral Selection Formats
 
-   void SetFrequencySelectionFormatName(const wxString & format);
-   const wxString & GetFrequencySelectionFormatName() const;
+   void SetFrequencySelectionFormatName(const NumericFormatId & format);
+   const NumericFormatId & GetFrequencySelectionFormatName() const;
 
-   void SetBandwidthSelectionFormatName(const wxString & format);
-   const wxString & GetBandwidthSelectionFormatName() const;
+   void SetBandwidthSelectionFormatName(const NumericFormatId & format);
+   const NumericFormatId & GetBandwidthSelectionFormatName() const;
 
    // Scrollbars
 
@@ -445,8 +460,6 @@ public:
 
    void FinishAutoScroll();
    void FixScrollbars();
-
-   void SafeDisplayStatusMessage(const wxChar *msg);
 
    bool MayScrollBeyondZero() const;
    double ScrollingLowerBoundTime() const;
@@ -494,10 +507,10 @@ public:
    const ToolsToolBar *GetToolsToolBar() const;
    TranscriptionToolBar *GetTranscriptionToolBar();
 
-   Meter *GetPlaybackMeter();
-   void SetPlaybackMeter(Meter *playback);
-   Meter *GetCaptureMeter();
-   void SetCaptureMeter(Meter *capture);
+   MeterPanel *GetPlaybackMeter();
+   void SetPlaybackMeter(MeterPanel *playback);
+   MeterPanel *GetCaptureMeter();
+   void SetCaptureMeter(MeterPanel *capture);
 
    LyricsWindow* GetLyricsWindow() { return mLyricsWindow; }
    MixerBoard* GetMixerBoard() { return mMixerBoard; }
@@ -514,19 +527,19 @@ public:
    void AS_SetRate(double rate) override;
    int AS_GetSnapTo() override;
    void AS_SetSnapTo(int snap) override;
-   const wxString & AS_GetSelectionFormat() override;
-   void AS_SetSelectionFormat(const wxString & format) override;
+   const NumericFormatId & AS_GetSelectionFormat() override;
+   void AS_SetSelectionFormat(const NumericFormatId & format) override;
    void AS_ModifySelection(double &start, double &end, bool done) override;
 
    // SpectralSelectionBarListener callback methods
 
    double SSBL_GetRate() const override;
 
-   const wxString & SSBL_GetFrequencySelectionFormatName() override;
-   void SSBL_SetFrequencySelectionFormatName(const wxString & formatName) override;
+   const NumericFormatId & SSBL_GetFrequencySelectionFormatName() override;
+   void SSBL_SetFrequencySelectionFormatName(const NumericFormatId & formatName) override;
 
-   const wxString & SSBL_GetBandwidthSelectionFormatName() override;
-   void SSBL_SetBandwidthSelectionFormatName(const wxString & formatName) override;
+   const NumericFormatId & SSBL_GetBandwidthSelectionFormatName() override;
+   void SSBL_SetBandwidthSelectionFormatName(const NumericFormatId & formatName) override;
 
    void SSBL_ModifySpectralSelection(double &bottom, double &top, bool done) override;
 
@@ -555,6 +568,9 @@ public:
       ( const wxString & Name, CommandFlag & flags, CommandFlag flagsRqd, CommandFlag mask );
    bool TryToMakeActionAllowed
       ( CommandFlag & flags, CommandFlag flagsRqd, CommandFlag mask );
+
+   bool UndoAvailable();
+   bool RedoAvailable();
 
    void PushState(const wxString &desc, const wxString &shortDesc); // use UndoPush::AUTOSAVE
    void PushState(const wxString &desc, const wxString &shortDesc, UndoPush flags);
@@ -585,7 +601,6 @@ public:
    double GetZoomOfToFit();
    double GetZoomOfSelection();
    double GetZoomOfPreset(int preset );
-   double GetZoomOfPref( const wxString & PresetPrefName, int defaultPreset );
 
  public:
    bool IsSoloSimple() const { return mSoloPref == wxT("Simple"); }
@@ -617,9 +632,9 @@ public:
    std::shared_ptr<TrackList> mTracks;
 
    int mSnapTo;
-   wxString mSelectionFormat;
-   wxString mFrequencySelectionFormatName;
-   wxString mBandwidthSelectionFormatName;
+   NumericFormatId mSelectionFormat;
+   NumericFormatId mFrequencySelectionFormatName;
+   NumericFormatId mBandwidthSelectionFormatName;
 
    std::shared_ptr<TrackList> mLastSavedTracks;
 
@@ -665,6 +680,7 @@ private:
    bool mActive{ true };
    bool mIconized;
 
+   MacrosWindow *mMacrosWindow{};
    HistoryWindow *mHistoryWindow{};
    LyricsWindow* mLyricsWindow{};
    MixerBoardFrame* mMixerBoardFrame{};
@@ -679,8 +695,8 @@ private:
    bool mShownOnce{ false };
 
    // Project owned meters
-   Meter *mPlaybackMeter{};
-   Meter *mCaptureMeter{};
+   MeterPanel *mPlaybackMeter{};
+   MeterPanel *mCaptureMeter{};
 
    std::unique_ptr<ToolManager> mToolManager;
 
@@ -790,7 +806,6 @@ public:
    {
    public:
       explicit PlaybackScroller(AudacityProject *project);
-      ~PlaybackScroller();
 
       enum class Mode {
          Off,

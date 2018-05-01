@@ -71,6 +71,10 @@
 #include "../Theme.h"
 #include "../widgets/HelpSystem.h"
 
+#if wxUSE_ACCESSIBILITY
+#include "../widgets/WindowAccessible.h"
+#endif
+
 BEGIN_EVENT_TABLE(PrefsDialog, wxDialogWrapper)
    EVT_BUTTON(wxID_OK, PrefsDialog::OnOK)
    EVT_BUTTON(wxID_CANCEL, PrefsDialog::OnCancel)
@@ -245,6 +249,10 @@ PrefsDialog::PrefsDialog
       wxASSERT(factories.size() > 0);
       if (!uniquePage) {
          mCategories = safenew wxTreebookExt(this, wxID_ANY, mTitlePrefix);
+#if wxUSE_ACCESSIBILITY
+         // so that name can be set on a standard control
+         mCategories->GetTreeCtrl()->SetAccessible(safenew WindowAccessible(mCategories->GetTreeCtrl()));
+#endif
          // RJH: Prevent NVDA from reading "treeCtrl"
          mCategories->GetTreeCtrl()->SetName(_("Category"));
          S.StartHorizontalLay(wxALIGN_LEFT | wxEXPAND, true);
@@ -261,7 +269,7 @@ PrefsDialog::PrefsDialog
                {
                   const PrefsNode &node = *it;
                   PrefsPanelFactory &factory = *node.pFactory;
-                  wxWindow *const w = factory.Create(mCategories);
+                  wxWindow *const w = factory(mCategories, wxID_ANY);
                   if (stack.empty())
                      // Parameters are: AddPage(page, name, IsSelected, imageId).
                      mCategories->AddPage(w, w->GetName(), false, 0);
@@ -289,7 +297,7 @@ PrefsDialog::PrefsDialog
          // Unique page, don't show the factory
          const PrefsNode &node = factories[0];
          PrefsPanelFactory &factory = *node.pFactory;
-         mUniquePage = factory.Create(this);
+         mUniquePage = factory(this, wxID_ANY);
          wxWindow * uniquePageWindow = S.Prop(1).AddWindow(mUniquePage, wxEXPAND);
          // We're not in the wxTreebook, so add the accelerator here
          wxAcceleratorEntry entries[1];
@@ -344,13 +352,17 @@ PrefsDialog::PrefsDialog
 
    sz.DecTo(screenRect.GetSize());
 
-   int prefWidth, prefHeight;
-   gPrefs->Read(wxT("/Prefs/Width"), &prefWidth, sz.x);
-   gPrefs->Read(wxT("/Prefs/Height"), &prefHeight, sz.y);
+   if( !mUniquePage ){
+      int prefWidth, prefHeight;
+      gPrefs->Read(wxT("/Prefs/Width"), &prefWidth, sz.x);
+      gPrefs->Read(wxT("/Prefs/Height"), &prefHeight, wxMax(480,sz.y));
 
-   wxSize prefSize = wxSize(prefWidth, prefHeight);
-   prefSize.DecTo(screenRect.GetSize());
-   SetSize(prefSize);
+      wxSize prefSize = wxSize(prefWidth, prefHeight);
+      prefSize.DecTo(screenRect.GetSize());
+      SetSize(prefSize);
+      InvalidateBestSize();
+      Layout();
+   }
    SetMinSize(sz);
 
    // Center after all that resizing, but make sure it doesn't end up
@@ -396,6 +408,14 @@ void PrefsDialog::OnCancel(wxCommandEvent & WXUNUSED(event))
    else
       mUniquePage->Cancel();
 
+   // Remember modified dialog size, even if cancelling.
+   if( !mUniquePage ){
+      wxSize sz = GetSize();
+      gPrefs->Write(wxT("/Prefs/Width"), sz.x);
+      gPrefs->Write(wxT("/Prefs/Height"), sz.y);
+   }
+   gPrefs->Flush();
+
    EndModal(false);
 }
 
@@ -426,6 +446,23 @@ void PrefsDialog::OnHelp(wxCommandEvent & WXUNUSED(event))
    if( !mCategories)
       page.Replace( "Spectrograms_Preferences", "Spectrogram_Settings" );
    HelpSystem::ShowHelp(this, page, true);
+}
+
+void PrefsDialog::ShuttleAll( ShuttleGui & S)
+{
+   // Validate all pages first
+   if (mCategories) {
+      for (size_t i = 0; i < mCategories->GetPageCount(); i++) {
+         S.ResetId();
+         PrefsPanel *panel = (PrefsPanel *)mCategories->GetPage(i);
+         panel->PopulateOrExchange( S );
+      }
+   }
+   else
+   {
+      S.ResetId();
+      mUniquePage->PopulateOrExchange( S );
+   }
 }
 
 void PrefsDialog::OnTreeKeyDown(wxTreeEvent & event)
@@ -461,7 +498,9 @@ void PrefsDialog::OnOK(wxCommandEvent & WXUNUSED(event))
    gPrefs->Flush();
    if (mCategories) {
       // Now apply the changes
-      for (size_t i = 0; i < mCategories->GetPageCount(); i++) {
+      // Reverse order - so Track Name is updated before language change
+      // A workaround for Bug 1661
+      for (int i = (int)mCategories->GetPageCount()-1; i>= 0; i--) {
          PrefsPanel *panel = (PrefsPanel *)mCategories->GetPage(i);
 
          panel->Preview();
@@ -473,9 +512,11 @@ void PrefsDialog::OnOK(wxCommandEvent & WXUNUSED(event))
       mUniquePage->Commit();
    }
 
-   wxSize sz = GetSize();
-   gPrefs->Write(wxT("/Prefs/Width"), sz.x);
-   gPrefs->Write(wxT("/Prefs/Height"), sz.y);
+   if( !mUniquePage ){
+      wxSize sz = GetSize();
+      gPrefs->Write(wxT("/Prefs/Width"), sz.x);
+      gPrefs->Write(wxT("/Prefs/Height"), sz.y);
+   }
    gPrefs->Flush();
 
    // Reads preference /GUI/Theme
@@ -517,8 +558,12 @@ void PrefsDialog::OnOK(wxCommandEvent & WXUNUSED(event))
    }
 
    WaveformSettings::defaults().LoadPrefs();
+   SpectrogramSettings::defaults().LoadPrefs();
 
-   EndModal(true);
+   if( IsModal() )
+      EndModal(true);
+   else
+      Destroy();
 }
 
 void PrefsDialog::SelectPageByName(const wxString &pageName)

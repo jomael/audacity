@@ -52,8 +52,8 @@ BEGIN_EVENT_TABLE(DevicePrefs, PrefsPanel)
    EVT_CHOICE(RecordID, DevicePrefs::OnDevice)
 END_EVENT_TABLE()
 
-DevicePrefs::DevicePrefs(wxWindow * parent)
-:  PrefsPanel(parent, _("Devices"))
+DevicePrefs::DevicePrefs(wxWindow * parent, wxWindowID winid)
+:  PrefsPanel(parent, winid, _("Devices"))
 {
    Populate();
 }
@@ -123,7 +123,6 @@ void DevicePrefs::PopulateOrExchange(ShuttleGui & S)
                              wxT(""),
                              mHostNames,
                              mHostLabels);
-         S.SetSizeHints(mHostNames);
 
          S.AddPrompt(_("Using:"));
          S.AddFixedText(wxString(wxSafeConvertMB2WX(Pa_GetVersionText())));
@@ -178,14 +177,14 @@ void DevicePrefs::PopulateOrExchange(ShuttleGui & S)
                                  DEFAULT_LATENCY_DURATION,
                                  9);
          S.AddUnits(_("milliseconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("milliseconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("milliseconds"));
 
          w = S.TieNumericTextBox(_("Track &shift after record:"),
                                  wxT("/AudioIO/LatencyCorrection"),
                                  DEFAULT_LATENCY_CORRECTION,
                                  9);
          S.AddUnits(_("milliseconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("milliseconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("milliseconds"));
       }
       S.EndThreeColumn();
    }
@@ -414,8 +413,8 @@ wxString DevicePrefs::HelpPageName()
    return "Devices_Preferences";
 }
 
-PrefsPanel *DevicePrefsFactory::Create(wxWindow *parent)
+PrefsPanel *DevicePrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
-   return safenew DevicePrefs(parent);
+   return safenew DevicePrefs(parent, winid);
 }

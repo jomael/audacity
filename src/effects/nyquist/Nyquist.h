@@ -28,28 +28,42 @@
 #include "nyx.h"
 
 #define NYQUISTEFFECTS_VERSION wxT("1.0.0.0")
-#define NYQUISTEFFECTS_FAMILY wxT("Nyquist")
+/* i18n-hint: "Nyquist" is an embedded interpreted programming language in
+ Audacity, named in honor of the Swedish-American Harry Nyquist (or Nyqvist).
+ In the translations of this and other strings, you may transliterate the
+ name into another alphabet.  */
+#define NYQUISTEFFECTS_FAMILY ( IdentInterfaceSymbol{ XO("Nyquist") } )
 
 #define NYQUIST_PROMPT_ID wxT("Nyquist Prompt")
+#define NYQUIST_TOOLS_PROMPT_ID wxT("Nyquist Tools Prompt")
 #define NYQUIST_WORKER_ID wxT("Nyquist Worker")
 
 enum NyqControlType
 {
    NYQ_CTRL_INT,
-   NYQ_CTRL_REAL,
+   NYQ_CTRL_FLOAT,
    NYQ_CTRL_STRING,
    NYQ_CTRL_CHOICE,
    NYQ_CTRL_INT_TEXT,
-   NYQ_CTRL_FLOAT_TEXT
+   NYQ_CTRL_FLOAT_TEXT,
+   NYQ_CTRL_TEXT,
+   NYQ_CTRL_TIME,
 };
 
 class NyqControl
 {
 public:
+   NyqControl() = default;
+   NyqControl( const NyqControl& ) = default;
+   NyqControl &operator = ( const NyqControl & ) = default;
+   //NyqControl( NyqControl && ) = default;
+   //NyqControl &operator = ( NyqControl && ) = default;
+
    int type;
    wxString var;
    wxString name;
    wxString label;
+   std::vector<IdentInterfaceSymbol> choices;
    wxString valStr;
    wxString lowStr;
    wxString highStr;
@@ -58,8 +72,6 @@ public:
    double high;
    int ticks;
 };
-
-WX_DECLARE_USER_EXPORTED_OBJARRAY(NyqControl,  NyqControlArray, AUDACITY_DLL_API);
 
 class AUDACITY_DLL_API NyquistEffect final : public Effect
 {
@@ -74,26 +86,26 @@ public:
    // IdentInterface implementation
 
    wxString GetPath() override;
-   wxString GetSymbol() override;
-   wxString GetName() override;
-   wxString GetVendor() override;
+   IdentInterfaceSymbol GetSymbol() override;
+   IdentInterfaceSymbol GetVendor() override;
    wxString GetVersion() override;
    wxString GetDescription() override;
    
    wxString ManualPage() override;
    wxString HelpPage() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
-   wxString GetFamily() override;
+   IdentInterfaceSymbol GetFamilyId() override;
    bool IsInteractive() override;
    bool IsDefault() override;
 
    // EffectClientInterface implementation
 
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool DefineParams( ShuttleParams & S ) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
 
    // Effect implementation
    
@@ -135,7 +147,7 @@ private:
 
    static wxString NyquistToWxString(const char *nyqString);
    wxString EscapeString(const wxString & inStr);
-   wxArrayString ParseChoice(const NyqControl & ctrl);
+   static std::vector<IdentInterfaceSymbol> ParseChoice(const wxString & text);
 
    static int StaticGetCallback(float *buffer, int channel,
                                 long start, long len, long totlen,
@@ -156,9 +168,21 @@ private:
    void ParseFile();
    bool ParseCommand(const wxString & cmd);
    bool ParseProgram(wxInputStream & stream);
-   void Parse(const wxString &line);
+   struct Tokenizer {
+      bool sl { false };
+      bool q { false };
+      int paren{ 0 };
+      wxString tok;
+      wxArrayString tokens;
 
-   wxString UnQuote(const wxString &s);
+      bool Tokenize(
+         const wxString &line, bool eof,
+         size_t trimStart, size_t trimEnd);
+   };
+   bool Parse(Tokenizer &tokenizer, const wxString &line, bool eof, bool first);
+
+   static wxString UnQuote(const wxString &s, bool allowParens = true,
+                           wxString *pExtraString = nullptr);
    double GetCtrlValue(const wxString &s);
 
    void OnLoad(wxCommandEvent & evt);
@@ -168,6 +192,9 @@ private:
    void OnText(wxCommandEvent & evt);
    void OnSlider(wxCommandEvent & evt);
    void OnChoice(wxCommandEvent & evt);
+   void OnTime(wxCommandEvent & evt);
+
+   wxString ToTimeFormat(double t);
 
 private:
 
@@ -187,7 +214,7 @@ private:
    bool              mExternal;
    bool              mIsSpectral;
    /** True if the code to execute is obtained interactively from the user via
-    * the "Nyquist Prompt", false for all other effects (lisp code read from
+    * the "Nyquist Prompt", or "Nyquist Tools Prompt", false for all other effects (lisp code read from
     * files)
     */
    bool              mIsPrompt;
@@ -196,8 +223,8 @@ private:
    wxString          mInputCmd; // history: exactly what the user typed
    wxString          mCmd;      // the command to be processed
    wxString          mName;   ///< Name of the Effect (untranslated)
-   wxString          mAction;
-   wxString          mInfo;
+   wxString          mAction; // translatable
+   wxString          mInfo;   // translatable
    wxString          mAuthor;
    wxString          mCopyright;
    wxString          mManPage;   // ONLY use if a help page exists in the manual.
@@ -214,7 +241,7 @@ private:
    wxString          mDebugOutput;
 
    int               mVersion;
-   NyqControlArray   mControls;
+   std::vector<NyqControl>   mControls;
 
    unsigned          mCurNumChannels;
    WaveTrack         *mCurTrack[2];

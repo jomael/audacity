@@ -30,7 +30,7 @@ EffectFade::~EffectFade()
 
 // IdentInterface implementation
 
-wxString EffectFade::GetSymbol()
+IdentInterfaceSymbol EffectFade::GetSymbol()
 {
    return mFadeIn
       ? FADEIN_PLUGIN_SYMBOL
@@ -44,7 +44,7 @@ wxString EffectFade::GetDescription()
       : _("Applies a linear fade-out to the selected audio");
 }
 
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 
 EffectType EffectFade::GetType()
 {

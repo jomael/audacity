@@ -75,8 +75,10 @@ CommandManager.  It holds the callback for one command.
 
 *//******************************************************************/
 
+#include "../AudacityHeaders.h"
 #include "../Audacity.h"
 #include "CommandManager.h"
+#include "CommandContext.h"
 
 #include <wx/defs.h>
 #include <wx/eventfilter.h>
@@ -88,7 +90,11 @@ CommandManager.  It holds the callback for one command.
 #include "../AudacityException.h"
 #include "../Prefs.h"
 #include "../Project.h"
+
+// LyricsPanel and MixerBoard both intercept keys, as if they were the TrackPanel.
+// The mechanism of checking for the type of window here is klunky.
 #include "../Lyrics.h"
+#include "../MixerBoard.h"
 
 #include "Keyboard.h"
 #include "../PluginManager.h"
@@ -96,6 +102,7 @@ CommandManager.  It holds the callback for one command.
 #include "../widgets/LinkingHtmlWindow.h"
 #include "../widgets/ErrorDialog.h"
 #include "../widgets/HelpSystem.h"
+
 
 // On wxGTK, there may be many many many plugins, but the menus don't automatically
 // allow for scrolling, so we build sub-menus.  If the menu gets longer than
@@ -426,6 +433,7 @@ CommandManager::CommandManager():
    bMakingOccultCommands( false )
 {
    mbSeparatorAllowed = false;
+   mLongNameForItem = "";
    SetMaxList();
 }
 
@@ -436,6 +444,71 @@ CommandManager::~CommandManager()
 {
    //WARNING: This removes menubars that could still be assigned to windows!
    PurgeData();
+}
+
+const std::vector<NormalizedKeyString> &CommandManager::ExcludedList()
+{
+   static const auto list = [] {
+      // These short cuts are for the max list only....
+      const char *const strings[] = {
+         "Ctrl+I",
+         "Ctrl+Alt+I",
+         "Ctrl+J",
+         "Ctrl+Alt+J",
+         "Ctrl+Alt+V",
+         "Alt+X",
+         "Alt+K",
+         "Shift+Alt+X",
+         "Shift+Alt+K",
+         "Alt+L",
+         "Shift+Alt+C",
+         "Alt+I",
+         "Alt+J",
+         "Shift+Alt+J",
+         "Ctrl+Shift+A",
+         "Q",
+         //"Shift+J",
+         //"Shift+K",
+         //"Shift+Home",
+         //"Shift+End",
+         "Ctrl+[",
+         "Ctrl+]",
+         "1",
+         "Shift+F5",
+         "Shift+F6",
+         "Shift+F7",
+         "Shift+F8",
+         "Ctrl+Shift+F5",
+         "Ctrl+Shift+F7",
+         "Ctrl+Shift+N",
+         "Ctrl+Shift+M",
+         "Ctrl+Home",
+         "Ctrl+End",
+         "Shift+C",
+         "Alt+Shift+Up",
+         "Alt+Shift+Down",
+         "Shift+P",
+         "Alt+Shift+Left",
+         "Alt+Shift+Right",
+         "Ctrl+Shift+T",
+         //"Command+M",
+         //"Option+Command+M",
+         "Shift+H",
+         "Shift+O",
+         "Shift+I",
+         "Shift+N",
+         "D",
+         "A",
+         "Alt+Shift+F6",
+         "Alt+F6",
+      };
+
+      std::vector<NormalizedKeyString> result(
+         strings, strings + sizeof(strings)/sizeof(*strings) );
+      std::sort( result.begin(), result.end() );
+      return result;
+   }();
+   return list;
 }
 
 // CommandManager needs to know which defaults are standard and which are in the 
@@ -450,66 +523,14 @@ void CommandManager::SetMaxList()
    // instead use flags in the menu entrys to indicate whether the default 
    // shortcut is standard or full.
 
-   mMaxListOnly.Clear();
+   mMaxListOnly.clear();
 
    // if the full list, don't exclude any.
    bool bFull = gPrefs->ReadBool(wxT("/GUI/Shortcuts/FullDefaults"),false);
    if( bFull )
       return;
 
-   // These short cuts are for the max list only....
-   //mMaxListOnly.Add( "Ctrl+I" );
-   mMaxListOnly.Add( "Ctrl+Alt+I" );
-   mMaxListOnly.Add( "Ctrl+J" );
-   mMaxListOnly.Add( "Ctrl+Alt+J" );
-   mMaxListOnly.Add( "Ctrl+Alt+V" );
-   mMaxListOnly.Add( "Alt+X" );
-   mMaxListOnly.Add( "Alt+K" );
-   mMaxListOnly.Add( "Shift+Alt+X" );
-   mMaxListOnly.Add( "Shift+Alt+K" );
-   mMaxListOnly.Add( "Alt+L" );
-   mMaxListOnly.Add( "Shift+Alt+C" );
-   mMaxListOnly.Add( "Alt+I" );
-   mMaxListOnly.Add( "Alt+J" );
-   mMaxListOnly.Add( "Shift+Alt+J" );
-   mMaxListOnly.Add( "Ctrl+Shift+A" );
-   mMaxListOnly.Add( "Q" );
-   //mMaxListOnly.Add( "Shift+J" );
-   //mMaxListOnly.Add( "Shift+K" );
-   //mMaxListOnly.Add( "Shift+Home" );
-   //mMaxListOnly.Add( "Shift+End" );
-   mMaxListOnly.Add( "Ctrl+[" );
-   mMaxListOnly.Add( "Ctrl+]" );
-   mMaxListOnly.Add( "1" );
-   mMaxListOnly.Add( "Shift+F5" );
-   mMaxListOnly.Add( "Shift+F6" );
-   mMaxListOnly.Add( "Shift+F7" );
-   mMaxListOnly.Add( "Shift+F8" );
-   mMaxListOnly.Add( "Ctrl+Shift+F5" );
-   mMaxListOnly.Add( "Ctrl+Shift+F7" );
-   mMaxListOnly.Add( "Ctrl+Shift+N" );
-   mMaxListOnly.Add( "Ctrl+Shift+M" );
-   mMaxListOnly.Add( "Ctrl+Home" );
-   mMaxListOnly.Add( "Ctrl+End" );
-   mMaxListOnly.Add( "Shift+C" );
-   mMaxListOnly.Add( "Alt+Shift+Up" );
-   mMaxListOnly.Add( "Alt+Shift+Down" );
-   mMaxListOnly.Add( "Shift+P" );
-   mMaxListOnly.Add( "Alt+Shift+Left" );
-   mMaxListOnly.Add( "Alt+Shift+Right" );
-   mMaxListOnly.Add( "Ctrl+Shift+T" );
-   //mMaxListOnly.Add( "Command+M" );
-   //mMaxListOnly.Add( "Option+Command+M" );
-   mMaxListOnly.Add( "Shift+H" );
-   mMaxListOnly.Add( "Shift+O" );
-   mMaxListOnly.Add( "Shift+I" );
-   mMaxListOnly.Add( "Shift+N" );
-   mMaxListOnly.Add( "D" );
-   mMaxListOnly.Add( "A" );
-   mMaxListOnly.Add( "Alt+Shift+F6" );
-   mMaxListOnly.Add( "Alt+F6" );
-
-   mMaxListOnly.Sort();
+   mMaxListOnly = ExcludedList();
 }
 
 
@@ -689,6 +710,7 @@ void CommandManager::ClearCurrentMenu()
    mCurrentMenu = nullptr;
 }
 
+#if 0
 ///
 /// Add a menu item to the current menu.  When the user selects it, the
 /// given functor will be called
@@ -745,7 +767,7 @@ void CommandManager::InsertItem(const wxString & name,
       }
    }
 
-   CommandListEntry *entry = NewIdentifier(name, label_in, menu, finder, callback, false, 0, 0);
+   CommandListEntry *entry = NewIdentifier(name, label_in, false, menu, finder, callback, {}, 0, 0, false);
    int ID = entry->id;
    wxString label = GetLabel(entry);
 
@@ -759,54 +781,71 @@ void CommandManager::InsertItem(const wxString & name,
 
    mbSeparatorAllowed = true;
 }
+#endif
 
 
 
 void CommandManager::AddCheck(const wxChar *name,
                               const wxChar *label,
+                              bool hasDialog,
                               CommandHandlerFinder finder,
                               CommandFunctorPointer callback,
                               int checkmark)
 {
-   AddItem(name, label, finder, callback, wxT(""),
+   AddItem(name, label, hasDialog, finder, callback, wxT(""),
            NoFlagsSpecifed, NoFlagsSpecifed, checkmark);
 }
 
 void CommandManager::AddCheck(const wxChar *name,
                               const wxChar *label,
+                              bool hasDialog,
                               CommandHandlerFinder finder,
                               CommandFunctorPointer callback,
                               int checkmark,
                               CommandFlag flags,
                               CommandMask mask)
 {
-   AddItem(name, label, finder, callback, wxT(""), flags, mask, checkmark);
+   AddItem(name, label, hasDialog, finder, callback, wxT(""), flags, mask, checkmark);
 }
 
 void CommandManager::AddItem(const wxChar *name,
                              const wxChar *label,
+                             bool hasDialog,
                              CommandHandlerFinder finder,
                              CommandFunctorPointer callback,
                              CommandFlag flags,
                              CommandMask mask,
+                             bool bIsEffect, 
                              const CommandParameter &parameter)
 {
-   AddItem(name, label, finder, callback, wxT(""), flags, mask, -1, parameter);
+   AddItem(name, label, hasDialog, finder, callback, wxT(""), flags, mask, -1, bIsEffect, parameter);
 }
 
 void CommandManager::AddItem(const wxChar *name,
                              const wxChar *label_in,
+                             bool hasDialog,
                              CommandHandlerFinder finder,
                              CommandFunctorPointer callback,
                              const wxChar *accel,
                              CommandFlag flags,
                              CommandMask mask,
                              int checkmark,
+                             bool bIsEffect, 
                              const CommandParameter &parameter)
 {
+   wxString cookedParameter;
+   if( parameter == "" )
+      cookedParameter = name;
+   else 
+      cookedParameter = parameter;
    CommandListEntry *entry =
-      NewIdentifier(name, label_in, accel, CurrentMenu(), finder, callback,
-                    false, 0, 0, parameter);
+      NewIdentifier(name, 
+         label_in, 
+         mLongNameForItem, 
+         hasDialog, 
+         accel, CurrentMenu(), finder, callback,
+         {}, 0, 0, bIsEffect, cookedParameter);
+   mLongNameForItem = "";
    int ID = entry->id;
    wxString label = GetLabelWithDisabledAccel(entry);
 
@@ -833,19 +872,25 @@ void CommandManager::AddItem(const wxChar *name,
 /// When you call Enable on this command name, it will enable or disable
 /// all of the items at once.
 void CommandManager::AddItemList(const wxString & name,
-                                 const wxArrayString & labels,
+                                 const TranslatedInternalString items[],
+                                 size_t nItems,
                                  CommandHandlerFinder finder,
-                                 CommandFunctorPointer callback)
+                                 CommandFunctorPointer callback,
+                                 bool bIsEffect)
 {
-   for (size_t i = 0, cnt = labels.GetCount(); i < cnt; i++) {
+   for (size_t i = 0, cnt = nItems; i < cnt; i++) {
       CommandListEntry *entry = NewIdentifier(name,
-                                              labels[i],
+                                              items[i].TranslatedForMenu(),
+                                              items[i].TranslatedForMenu(),
+                                              // No means yet to specify !
+                                              false,
                                               CurrentMenu(),
                                               finder,
                                               callback,
-                                              true,
+                                              items[i].Internal(),
                                               i,
-                                              cnt);
+                                              cnt,
+                                              bIsEffect);
       CurrentMenu()->Append(entry->id, GetLabel(entry));
       mbSeparatorAllowed = true;
    }
@@ -872,7 +917,7 @@ void CommandManager::AddCommand(const wxChar *name,
                                 CommandFlag flags,
                                 CommandMask mask)
 {
-   NewIdentifier(name, label_in, accel, NULL, finder, callback, false, 0, 0, {});
+   NewIdentifier(name, label_in, label_in, false, accel, NULL, finder, callback, {}, 0, 0, false, {});
 
    if (flags != NoFlagsSpecifed || mask != NoFlagsSpecifed) {
       SetCommandFlags(name, flags, mask);
@@ -881,13 +926,14 @@ void CommandManager::AddCommand(const wxChar *name,
 
 void CommandManager::AddGlobalCommand(const wxChar *name,
                                       const wxChar *label_in,
+                                      bool hasDialog,
                                       CommandHandlerFinder finder,
                                       CommandFunctorPointer callback,
                                       const wxChar *accel)
 {
    CommandListEntry *entry =
-      NewIdentifier(name, label_in, accel, NULL, finder, callback,
-                    false, 0, 0, {});
+      NewIdentifier(name, label_in, label_in, hasDialog, accel, NULL, finder, callback,
+                    {}, 0, 0, false, {});
 
    entry->enabled = false;
    entry->isGlobal = true;
@@ -920,35 +966,48 @@ int CommandManager::NextIdentifier(int ID)
 ///and keep menus above wxID_HIGHEST
 CommandListEntry *CommandManager::NewIdentifier(const wxString & name,
                                                 const wxString & label,
+                                                const wxString & longLabel,
+                                                bool hasDialog,
                                                 wxMenu *menu,
                                                 CommandHandlerFinder finder,
                                                 CommandFunctorPointer callback,
-                                                bool multi,
+                                                const wxString &nameSuffix,
                                                 int index,
-                                                int count)
+                                                int count,
+                                                bool bIsEffect)
 {
    return NewIdentifier(name,
                         label.BeforeFirst(wxT('\t')),
+                        longLabel.BeforeFirst(wxT('\t')),
+                        hasDialog,
                         label.AfterFirst(wxT('\t')),
                         menu,
                         finder,
                         callback,
-                        multi,
+                        nameSuffix,
                         index,
-                        count, {});
+                        count,
+                        bIsEffect,
+                        {});
 }
 
-CommandListEntry *CommandManager::NewIdentifier(const wxString & name,
+CommandListEntry *CommandManager::NewIdentifier(const wxString & nameIn,
    const wxString & label,
+   const wxString & longLabel,
+   bool hasDialog,
    const wxString & accel,
    wxMenu *menu,
    CommandHandlerFinder finder,
    CommandFunctorPointer callback,
-   bool multi,
+   const wxString &nameSuffix,
    int index,
    int count,
+   bool bIsEffect,
    const CommandParameter &parameter)
 {
+   const bool multi = !nameSuffix.empty();
+   wxString name = nameIn;
+
    // If we have the identifier already, reuse it.
    CommandListEntry *prev = mCommandNameHash[name];
    if (!prev);
@@ -964,6 +1023,18 @@ CommandListEntry *CommandManager::NewIdentifier(const wxString & name,
       wxString labelPrefix;
       if (!mSubMenuList.empty()) {
          labelPrefix = mSubMenuList.back()->name;
+      }
+
+      // For key bindings for commands with a list, such as align,
+      // the name in prefs is the category name plus the effect name.
+      // This feature is not used for built-in effects.
+      if (multi) {
+         // The name needs to be clean for use by automation.
+         wxString cleanedName = wxString::Format(wxT("%s_%s"), name, nameSuffix);
+         cleanedName.Replace( "/", "" );
+         cleanedName.Replace( "&", "" );
+         cleanedName.Replace( " ", "" );
+         name = cleanedName;
       }
 
       // wxMac 2.5 and higher will do special things with the
@@ -990,13 +1061,16 @@ CommandListEntry *CommandManager::NewIdentifier(const wxString & name,
 
       entry->name = name;
       entry->label = label;
-      entry->key = KeyStringNormalize(accel.BeforeFirst(wxT('\t')));
+      entry->longLabel = longLabel.IsEmpty() ? label : longLabel;
+      entry->hasDialog = hasDialog;
+      entry->key = NormalizedKeyString{ accel.BeforeFirst(wxT('\t')) };
       entry->defaultKey = entry->key;
       entry->labelPrefix = labelPrefix;
       entry->labelTop = wxMenuItem::GetLabelText(mCurrentMenuName);
       entry->menu = menu;
       entry->finder = finder;
       entry->callback = callback;
+      entry->isEffect = bIsEffect;
       entry->multi = multi;
       entry->index = index;
       entry->count = count;
@@ -1012,20 +1086,15 @@ CommandListEntry *CommandManager::NewIdentifier(const wxString & name,
       // Note that the default is unaffected, intentionally so.
       // There are effectively two levels of default, the full (max) list
       // and the normal reduced list.
-      if( mMaxListOnly.Index( entry->key ) !=-1) 
-         entry->key = wxT("");
+      if( std::binary_search( mMaxListOnly.begin(), mMaxListOnly.end(),
+                              entry->key ) )
+         entry->key = {};
 
-
-      // For key bindings for commands with a list, such as effects,
-      // the name in prefs is the category name plus the effect name.
-      if (multi) {
-         entry->name = wxString::Format(wxT("%s:%s"), name, label);
-      }
-
-      // Key from preferences overridse the default key given
+      // Key from preferences overrides the default key given
       gPrefs->SetPath(wxT("/NewKeys"));
       if (gPrefs->HasEntry(entry->name)) {
-         entry->key = KeyStringNormalize(gPrefs->Read(entry->name, entry->key));
+         entry->key =
+            NormalizedKeyString{ gPrefs->Read(entry->name, entry->key.Raw()) };
       }
       gPrefs->SetPath(wxT("/"));
 
@@ -1058,7 +1127,7 @@ CommandListEntry *CommandManager::NewIdentifier(const wxString & name,
 #endif
    mCommandNameHash[entry->name] = entry;
 
-   if (entry->key != wxT("")) {
+   if (!entry->key.empty()) {
       mCommandKeyHash[entry->key] = entry;
    }
 
@@ -1068,9 +1137,9 @@ CommandListEntry *CommandManager::NewIdentifier(const wxString & name,
 wxString CommandManager::GetLabel(const CommandListEntry *entry) const
 {
    wxString label = entry->label;
-   if (!entry->key.IsEmpty())
+   if (!entry->key.empty())
    {
-      label += wxT("\t") + entry->key;
+      label += wxT("\t") + entry->key.Raw();
    }
 
    return label;
@@ -1087,40 +1156,41 @@ wxString CommandManager::GetLabelWithDisabledAccel(const CommandListEntry *entry
 #if 1
    wxString Accel = "";
    do{
-      if (!entry->key.IsEmpty())
+      if (!entry->key.empty())
       {
          // Dummy accelerator that looks Ok in menus but is non functional.
          // Note the space before the key.
 #ifdef __WXMSW__
-         Accel = wxString("\t ") + entry->key;
-         if( entry->key.StartsWith("Left" )) break;
-         if( entry->key.StartsWith("Right")) break;
-         if( entry->key.StartsWith("Up" )) break;
-         if( entry->key.StartsWith("Down")) break;
-         if( entry->key.StartsWith("Return")) break;
-         if( entry->key.StartsWith("Tab")) break;
-         if( entry->key.StartsWith("Shift+Tab")) break;
-         if( entry->key.StartsWith("0")) break;
-         if( entry->key.StartsWith("1")) break;
-         if( entry->key.StartsWith("2")) break;
-         if( entry->key.StartsWith("3")) break;
-         if( entry->key.StartsWith("4")) break;
-         if( entry->key.StartsWith("5")) break;
-         if( entry->key.StartsWith("6")) break;
-         if( entry->key.StartsWith("7")) break;
-         if( entry->key.StartsWith("8")) break;
-         if( entry->key.StartsWith("9")) break;
+         auto key = entry->key.Raw();
+         Accel = wxString("\t ") + key;
+         if( key.StartsWith("Left" )) break;
+         if( key.StartsWith("Right")) break;
+         if( key.StartsWith("Up" )) break;
+         if( key.StartsWith("Down")) break;
+         if( key.StartsWith("Return")) break;
+         if( key.StartsWith("Tab")) break;
+         if( key.StartsWith("Shift+Tab")) break;
+         if( key.StartsWith("0")) break;
+         if( key.StartsWith("1")) break;
+         if( key.StartsWith("2")) break;
+         if( key.StartsWith("3")) break;
+         if( key.StartsWith("4")) break;
+         if( key.StartsWith("5")) break;
+         if( key.StartsWith("6")) break;
+         if( key.StartsWith("7")) break;
+         if( key.StartsWith("8")) break;
+         if( key.StartsWith("9")) break;
          // Uncomment the below so as not to add the illegal accelerators.
          // Accel = "";
          //if( entry->key.StartsWith("Space" )) break;
          // These ones appear to be illegal already and mess up accelerator processing.
-         if( entry->key.StartsWith("NUMPAD_ENTER" )) break;
-         if( entry->key.StartsWith("Backspace" )) break;
-         if( entry->key.StartsWith("Delete" )) break;
+         if( key.StartsWith("NUMPAD_ENTER" )) break;
+         if( key.StartsWith("Backspace" )) break;
+         if( key.StartsWith("Delete" )) break;
 #endif
          //wxLogDebug("Added Accel:[%s][%s]", entry->label, entry->key );
          // Normal accelerator.
-         Accel = wxString("\t") + entry->key;
+         Accel = wxString("\t") + entry->key.Raw();
       }
    } while (false );
    label += Accel;
@@ -1235,18 +1305,19 @@ void CommandManager::Modify(const wxString &name, const wxString &newLabel)
    }
 }
 
-void CommandManager::SetKeyFromName(const wxString &name, const wxString &key)
+void CommandManager::SetKeyFromName(const wxString &name,
+                                    const NormalizedKeyString &key)
 {
    CommandListEntry *entry = mCommandNameHash[name];
    if (entry) {
-      entry->key = KeyStringNormalize(key);
+      entry->key = key;
    }
 }
 
-void CommandManager::SetKeyFromIndex(int i, const wxString &key)
+void CommandManager::SetKeyFromIndex(int i, const NormalizedKeyString &key)
 {
    const auto &entry = mCommandList[i];
-   entry->key = KeyStringNormalize(key);
+   entry->key = key;
 }
 
 void CommandManager::TellUserWhyDisallowed( const wxString & Name, CommandFlag flagsGot, CommandMask flagsRequired )
@@ -1291,6 +1362,9 @@ void CommandManager::TellUserWhyDisallowed( const wxString & Name, CommandFlag f
    }
    else if( missingFlags & WaveTracksSelectedFlag)
       reason = _("You must first select some audio to perform this action.\n(Selecting other kinds of track won't work.)");
+   else if ( missingFlags & TracksSelectedFlag )
+      // i18n-hint: %s will be replaced by the name of an action, such as "Remove Tracks".
+      reason = wxString::Format(_("\"%s\" requires one or more tracks to be selected."), Name);
    // If the only thing wrong was no tracks, we do nothing and don't report a problem
    else if( missingFlags == TracksExistFlag )
       return;
@@ -1310,7 +1384,7 @@ void CommandManager::TellUserWhyDisallowed( const wxString & Name, CommandFlag f
 }
 
 wxString CommandManager::DescribeCommandsAndShortcuts
-(const LocalizedCommandNameVector &commands) const
+(const TranslatedInternalString commands[], size_t nCommands) const
 {
    wxString mark;
    // This depends on the language setting and may change in-session after
@@ -1321,19 +1395,20 @@ wxString CommandManager::DescribeCommandsAndShortcuts
 
    static const wxString &separatorFormat = wxT("%s / %s");
    wxString result;
-   for (const auto &pair : commands) {
+   for (size_t ii = 0; ii < nCommands; ++ii) {
+      const auto &pair = commands[ii];
       // If RTL, then the control character forces right-to-left sequencing of
       // "/" -separated command names, and puts any "(...)" shortcuts to the
       // left, consistently with accelerators in menus (assuming matching
       // operating system prefernces for language), even if the command name
       // was missing from the translation file and defaulted to the English.
-      auto piece = wxString::Format(wxT("%s%s"), mark, pair.first);
+      auto piece = wxString::Format(wxT("%s%s"), mark, pair.Translated());
 
-      wxString name{ pair.second };
+      wxString name{ pair.Internal() };
       if (!name.empty()) {
          auto keyStr = GetKeyFromName(name);
          if (!keyStr.empty()){
-            auto keyString = KeyStringDisplay(keyStr, true);
+            auto keyString = keyStr.Display(true);
             auto format = wxT("%s %s(%s)");
 #ifdef __WXMAC__
             // The unicode controls push and pop left-to-right embedding.
@@ -1382,10 +1457,19 @@ bool CommandManager::FilterKeyEvent(AudacityProject *project, const wxKeyEvent &
       return HandleCommandEntry(entry, NoFlagsSpecifed, NoFlagsSpecifed, &evt);
    }
 
-   // Any other keypresses must be destined for this project window.
-   if (!permit && 
-       (wxGetTopLevelParent(wxWindow::FindFocus()) != project ||
-        !wxEventLoop::GetActive()->IsMain()))
+   wxWindow * pFocus = wxWindow::FindFocus();
+   wxWindow * pParent = wxGetTopLevelParent( pFocus );
+   bool validTarget = pParent == project;
+   // Bug 1557.  MixerBoard should count as 'destined for project'
+   // MixerBoard IS a TopLevelWindow, and its parent is the project.
+   if( pParent && pParent->GetParent() == project){
+      if( dynamic_cast<MixerBoardFrame*>( pParent) != NULL )
+         validTarget = true;
+   }
+   validTarget = validTarget && wxEventLoop::GetActive()->IsMain();
+
+   // Any other keypresses must be destined for this project window
+   if (!permit && !validTarget )
    {
       return false;
    }
@@ -1403,7 +1487,7 @@ bool CommandManager::FilterKeyEvent(AudacityProject *project, const wxKeyEvent &
       bool bIntercept = pWnd !=  pTrackPanel;
       // Intercept keys from windows that are NOT the Lyrics panel
       if( bIntercept ){
-         bIntercept = pWnd && ( dynamic_cast<Lyrics*>(pWnd) == NULL );
+         bIntercept = pWnd && ( dynamic_cast<LyricsPanel*>(pWnd) == NULL );
       }
       //wxLogDebug("Focus: %p TrackPanel: %p", pWnd, pTrackPanel );
       // We allow the keystrokes below to be handled by wxWidgets controls IF we are 
@@ -1490,7 +1574,7 @@ bool CommandManager::HandleCommandEntry(const CommandListEntry * entry,
          return true;
    }
 
-   CommandContext context{ *proj, evt, entry->index, entry->parameter };
+   const CommandContext context{ *proj, evt, entry->index, entry->parameter };
    auto &handler = entry->finder(*proj);
    (handler.*(entry->callback))(context);
 
@@ -1527,7 +1611,7 @@ bool CommandManager::HandleMenuID(int id, CommandFlag flags, CommandMask mask)
 /// HandleTextualCommand() allows us a limitted version of script/batch
 /// behavior, since we can get from a string command name to the actual
 /// code to run.
-bool CommandManager::HandleTextualCommand(const wxString & Str, CommandFlag flags, CommandMask mask)
+bool CommandManager::HandleTextualCommand(const wxString & Str, const CommandContext & context, CommandFlag flags, CommandMask mask)
 {
    if( Str.IsEmpty() )
       return false;
@@ -1537,7 +1621,15 @@ bool CommandManager::HandleTextualCommand(const wxString & Str, CommandFlag flag
       if (!entry->multi)
       {
          // Testing against labelPrefix too allows us to call Nyquist functions by name.
-         if( Str.IsSameAs( entry->name ) || Str.IsSameAs( entry->labelPrefix ))
+         if( Str.IsSameAs( entry->name, false ) || Str.IsSameAs( entry->labelPrefix, false ))
+         {
+            return HandleCommandEntry( entry.get(), flags, mask);
+         }
+      }
+      else
+      {
+         // Handle multis too...
+         if( Str.IsSameAs( entry->name, false ) )
          {
             return HandleCommandEntry( entry.get(), flags, mask);
          }
@@ -1557,9 +1649,9 @@ bool CommandManager::HandleTextualCommand(const wxString & Str, CommandFlag flag
    const PluginDescriptor *plug = pm.GetFirstPlugin(PluginTypeEffect);
    while (plug)
    {
-      if (em.GetEffectIdentifier(plug->GetID()).IsSameAs(Str))
+      if (em.GetCommandIdentifier(plug->GetID()).IsSameAs(Str, false))
       {
-         return proj->DoEffect(plug->GetID(), AudacityProject::OnEffectFlags::kConfigured);
+         return proj->DoEffect(plug->GetID(), context, AudacityProject::OnEffectFlags::kConfigured);
       }
       plug = pm.GetNextPlugin(PluginTypeEffect);
    }
@@ -1599,31 +1691,41 @@ void CommandManager::GetCategories(wxArrayString &cats)
 }
 
 void CommandManager::GetAllCommandNames(wxArrayString &names,
-                                        bool includeMultis)
+                                        bool includeMultis) const
 {
    for(const auto &entry : mCommandList) {
+      if ( entry->isEffect )
+         continue;
       if (!entry->multi)
          names.Add(entry->name);
       else if( includeMultis )
-         names.Add(entry->name + wxT(":")/*+ mCommandList[i]->label*/);
+         names.Add(entry->name );// + wxT(":")/*+ mCommandList[i]->label*/);
    }
 }
 
 void CommandManager::GetAllCommandLabels(wxArrayString &names,
-                                        bool includeMultis)
+                                         std::vector<bool> &vHasDialog,
+                                        bool includeMultis) const
 {
+   vHasDialog.clear();
    for(const auto &entry : mCommandList) {
+      // This is fetching commands from the menus, for use as batch commands.
+      // Until we have properly merged EffectManager and CommandManager
+      // we explicitly exclude effects, as they are already handled by the 
+      // effects Manager.
+      if ( entry->isEffect )
+         continue;
       if (!entry->multi)
-         names.Add(entry->label);
+         names.Add(entry->longLabel), vHasDialog.push_back(entry->hasDialog);
       else if( includeMultis )
-         names.Add(entry->label);
+         names.Add(entry->longLabel), vHasDialog.push_back(entry->hasDialog);
    }
 }
 
 void CommandManager::GetAllCommandData(
    wxArrayString &names,
-   wxArrayString &keys,
-   wxArrayString &default_keys,
+   std::vector<NormalizedKeyString> &keys,
+   std::vector<NormalizedKeyString> &default_keys,
    wxArrayString &labels,
    wxArrayString &categories,
 #if defined(EXPERIMENTAL_KEY_VIEW)
@@ -1632,11 +1734,15 @@ void CommandManager::GetAllCommandData(
    bool includeMultis)
 {
    for(const auto &entry : mCommandList) {
+      // GetAllCommandData is used by KeyConfigPrefs.
+      // It does need the effects.
+      //if ( entry->isEffect )
+      //   continue;
       if (!entry->multi)
       {
          names.Add(entry->name);
-         keys.Add(entry->key);
-         default_keys.Add(entry->defaultKey);
+         keys.push_back(entry->key);
+         default_keys.push_back(entry->defaultKey);
          labels.Add(entry->label);
          categories.Add(entry->labelTop);
 #if defined(EXPERIMENTAL_KEY_VIEW)
@@ -1646,8 +1752,8 @@ void CommandManager::GetAllCommandData(
       else if( includeMultis )
       {
          names.Add(entry->name);
-         keys.Add(entry->key);
-         default_keys.Add(entry->defaultKey);
+         keys.push_back(entry->key);
+         default_keys.push_back(entry->defaultKey);
          labels.Add(entry->label);
          categories.Add(entry->labelTop);
 #if defined(EXPERIMENTAL_KEY_VIEW)
@@ -1656,13 +1762,22 @@ void CommandManager::GetAllCommandData(
       }
    }
 }
+
+wxString CommandManager::GetNameFromID(int id)
+{
+   CommandListEntry *entry = mCommandIDHash[id];
+   if (!entry)
+      return wxT("");
+   return entry->name;
+}
+
 wxString CommandManager::GetLabelFromName(const wxString &name)
 {
    CommandListEntry *entry = mCommandNameHash[name];
    if (!entry)
       return wxT("");
 
-   return entry->label;
+   return entry->longLabel;
 }
 
 wxString CommandManager::GetPrefixedLabelFromName(const wxString &name)
@@ -1691,22 +1806,22 @@ wxString CommandManager::GetCategoryFromName(const wxString &name)
    return entry->labelTop;
 }
 
-wxString CommandManager::GetKeyFromName(const wxString &name) const
+NormalizedKeyString CommandManager::GetKeyFromName(const wxString &name) const
 {
    CommandListEntry *entry =
       // May create a NULL entry
       const_cast<CommandManager*>(this)->mCommandNameHash[name];
    if (!entry)
-      return wxT("");
+      return {};
 
    return entry->key;
 }
 
-wxString CommandManager::GetDefaultKeyFromName(const wxString &name)
+NormalizedKeyString CommandManager::GetDefaultKeyFromName(const wxString &name)
 {
    CommandListEntry *entry = mCommandNameHash[name];
    if (!entry)
-      return wxT("");
+      return {};
 
    return entry->defaultKey;
 }
@@ -1719,7 +1834,7 @@ bool CommandManager::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
 
    if (!wxStrcmp(tag, wxT("command"))) {
       wxString name;
-      wxString key;
+      NormalizedKeyString key;
 
       while(*attrs) {
          const wxChar *attr = *attrs++;
@@ -1731,12 +1846,12 @@ bool CommandManager::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
          if (!wxStrcmp(attr, wxT("name")) && XMLValueChecker::IsGoodString(value))
             name = value;
          if (!wxStrcmp(attr, wxT("key")) && XMLValueChecker::IsGoodString(value))
-            key = KeyStringNormalize(value);
+            key = NormalizedKeyString{ value };
       }
 
       if (mCommandNameHash[name]) {
          if (GetDefaultKeyFromName(name) != key) {
-            mCommandNameHash[name]->key = KeyStringNormalize(key);
+            mCommandNameHash[name]->key = key;
             mXMLKeysRead++;
          }
       }
@@ -1773,7 +1888,7 @@ void CommandManager::WriteXML(XMLWriter &xmlFile) const
       xmlFile.StartTag(wxT("command"));
       xmlFile.WriteAttr(wxT("name"), entry->name);
       xmlFile.WriteAttr(wxT("label"), label);
-      xmlFile.WriteAttr(wxT("key"), entry->key);
+      xmlFile.WriteAttr(wxT("key"), entry->key.Raw());
       xmlFile.EndTag(wxT("command"));
    }
 
@@ -1829,7 +1944,7 @@ void CommandManager::CheckDups()
 {
    int cnt = mCommandList.size();
    for (size_t j = 0;  (int)j < cnt; j++) {
-      if (mCommandList[j]->key.IsEmpty()) {
+      if (mCommandList[j]->key.empty()) {
          continue;
       }
 
@@ -1845,7 +1960,7 @@ void CommandManager::CheckDups()
          if (mCommandList[i]->key == mCommandList[j]->key) {
             wxString msg;
             msg.Printf(wxT("key combo '%s' assigned to '%s' and '%s'"),
-                       mCommandList[i]->key,
+                       mCommandList[i]->key.Raw(),
                        mCommandList[i]->label.BeforeFirst(wxT('\t')),
                        mCommandList[j]->label.BeforeFirst(wxT('\t')));
             wxASSERT_MSG(mCommandList[i]->key != mCommandList[j]->key, msg);
