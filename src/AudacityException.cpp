@@ -24,7 +24,7 @@ got to show.
 
 #include <wx/atomic.h>
 
-#include "widgets/ErrorDialog.h"
+#include "widgets/AudacityMessageBox.h"
 
 AudacityException::~AudacityException()
 {
@@ -32,7 +32,7 @@ AudacityException::~AudacityException()
 
 wxAtomicInt sOutstandingMessages {};
 
-MessageBoxException::MessageBoxException( const wxString &caption_ )
+MessageBoxException::MessageBoxException( const TranslatableString &caption_ )
    : caption{ caption_ }
 {
    if (!caption.empty())
@@ -80,15 +80,9 @@ SimpleMessageBoxException::~SimpleMessageBoxException()
 {
 }
 
-wxString SimpleMessageBoxException::ErrorMessage() const
+TranslatableString SimpleMessageBoxException::ErrorMessage() const
 {
    return message;
-}
-
-std::unique_ptr< AudacityException > SimpleMessageBoxException::Move()
-{
-   return std::unique_ptr< AudacityException >
-   { safenew SimpleMessageBoxException{ std::move( *this ) } };
 }
 
 // This is meant to be invoked via wxEvtHandler::CallAfter
@@ -103,7 +97,7 @@ void MessageBoxException::DelayedHandlerAction()
       if ( wxAtomicDec( sOutstandingMessages ) == 0 )
          ::AudacityMessageBox(
             ErrorMessage(),
-            caption.IsEmpty() ? AudacityMessageBoxCaptionStr() : caption,
+            (caption.empty() ? AudacityMessageBoxCaptionStr() : caption),
             wxICON_ERROR
          );
       moved = true;

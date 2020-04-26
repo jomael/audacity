@@ -13,30 +13,19 @@
 #ifndef __AUDACITY_SLIDER__
 #define __AUDACITY_SLIDER__
 
-#include "../Experimental.h"
-
-#include "../MemoryX.h"
+#include <wx/setup.h> // for wxUSE_* macros
 #include <wx/defs.h>
-#include <wx/window.h>
-#include <wx/panel.h>
-#include <wx/timer.h>
-#include "widgets/wxPanelWrapper.h"
+#include <wx/timer.h> // member variable
+#include "wxPanelWrapper.h" // to inherit
 
-#if wxUSE_ACCESSIBILITY
-#include <wx/access.h>
-#include "WindowAccessible.h"
-#endif
-
+class wxArrayString;
 class wxBitmap;
-class wxCursor;
-class wxImage;
 class wxSize;
 class wxPoint;
 class wxTextCtrl;
-class wxButton;
 
 class Ruler;
-class TipPanel;
+class TipWindow;
 
 //
 // Predefined slider types (mStyle)
@@ -79,7 +68,7 @@ class LWSlider
 
    // MM: Construct customizable slider
    LWSlider(wxWindow * parent,
-            const wxString &name,
+            const TranslatableString &name,
             const wxPoint &pos,
             const wxSize &size,
             float minValue,
@@ -93,7 +82,7 @@ class LWSlider
 
    // Construct predefined slider
    LWSlider(wxWindow * parent,
-            const wxString &name,
+            const TranslatableString &name,
             const wxPoint &pos,
             const wxSize &size,
             int style,
@@ -102,7 +91,7 @@ class LWSlider
             int orientation = wxHORIZONTAL); // wxHORIZONTAL or wxVERTICAL. wxVERTICAL is currently only for DB_SLIDER.
 
    void Init(wxWindow * parent,
-             const wxString &name,
+             const TranslatableString &name,
              const wxPoint &pos,
              const wxSize &size,
              float minValue,
@@ -127,7 +116,7 @@ class LWSlider
    void SetScroll(float line, float page);
 
    void ShowTip(bool show);
-   void SetToolTipTemplate(const wxString & tip);
+   void SetToolTipTemplate(const TranslatableString & tip);
 
    float Get(bool convert = true);
    void Set(float value);
@@ -146,7 +135,7 @@ class LWSlider
    void OnPaint(wxDC &dc, bool highlighted);
    void OnSize(wxSizeEvent & event);
    void OnMouseEvent(wxMouseEvent & event);
-   void OnKeyEvent(wxKeyEvent & event);
+   void OnKeyDown(wxKeyEvent & event);
    void Refresh();
 
    bool ShowDialog();
@@ -158,11 +147,12 @@ class LWSlider
    static void DeleteSharedTipPanel();
 
    void SetParent(wxWindow *parent) { mParent = parent; }
+   void SendUpdate(float newValue);
 
  private:
 
-   wxString GetTip(float value) const;
-   wxArrayString GetWidestTips() const;
+   TranslatableString GetTip(float value) const;
+   TranslatableStrings GetWidestTips() const;
    void FormatPopWin();
    void SetPopWinPosition();
    void CreatePopWin();
@@ -170,7 +160,6 @@ class LWSlider
 
    bool DoShowDialog(wxPoint pos);
 
-   void SendUpdate( float newValue );
 
    int ValueToPosition(float val);
    float DragPositionToValue(int fromPos, bool shiftDown);
@@ -228,14 +217,14 @@ class LWSlider
 
    wxWindowID mID;
 
-   std::unique_ptr<TipPanel> mTipPanel;
-   wxString mTipTemplate;
+   std::unique_ptr<TipWindow> mTipPanel;
+   TranslatableString mTipTemplate;
 
    bool mIsDragging;
 
    std::unique_ptr<wxBitmap> mBitmap, mThumbBitmap, mThumbBitmapHilited;
 
-   wxString mName;
+   TranslatableString mName;
 
    bool mEnabled;
 };
@@ -270,7 +259,7 @@ class ASlider /* not final */ : public wxPanel
 
    ASlider( wxWindow * parent,
             wxWindowID id,
-            const wxString &name,
+            const TranslatableString &name,
             const wxPoint & pos,
             const wxSize & size,
             const Options &options = Options{});
@@ -284,7 +273,7 @@ class ASlider /* not final */ : public wxPanel
    void GetScroll(float & line, float & page);
    void SetScroll(float line, float page);
 
-   void SetToolTipTemplate(const wxString & tip);
+   void SetToolTipTemplate(const TranslatableString & tip);
 
    float Get( bool convert = true );
    void Set(float value);
@@ -300,7 +289,7 @@ class ASlider /* not final */ : public wxPanel
    void OnSize(wxSizeEvent & event);
    void OnMouseEvent(wxMouseEvent & event);
    void OnCaptureLost(wxMouseCaptureLostEvent & event);
-   void OnKeyEvent(wxKeyEvent &event);
+   void OnKeyDown(wxKeyEvent &event);
    void OnSlider(wxCommandEvent &event);
    void OnSetFocus(wxFocusEvent & event);
    void OnKillFocus(wxFocusEvent & event);
@@ -342,13 +331,14 @@ class SliderDialog final : public wxDialogWrapper
 {
  public:
    SliderDialog(wxWindow * parent, wxWindowID id,
-                const wxString & title,
+                const TranslatableString & title,
                 wxPoint position,
                 wxSize size,
                 int style,
                 float value,
                 float line,
-                float page);
+                float page,
+                LWSlider * pSlider=nullptr);
    ~SliderDialog();
 
    float Get();
@@ -363,81 +353,10 @@ class SliderDialog final : public wxDialogWrapper
    ASlider * mSlider;
    wxTextCtrl * mTextCtrl;
    int mStyle;
+   LWSlider * mpOrigin;
 
  public:
    DECLARE_EVENT_TABLE()
 };
-
-
-#if wxUSE_ACCESSIBILITY
-
-class ASliderAx final : public WindowAccessible
-{
-public:
-   ASliderAx(wxWindow * window);
-
-   virtual ~ ASliderAx();
-
-   // Retrieves the address of an IDispatch interface for the specified child.
-   // All objects must support this property.
-   wxAccStatus GetChild(int childId, wxAccessible** child) override;
-
-   // Gets the number of children.
-   wxAccStatus GetChildCount(int* childCount) override;
-
-   // Gets the default action for this object (0) or > 0 (the action for a child).
-   // Return wxACC_OK even if there is no action. actionName is the action, or the empty
-   // string if there is no action.
-   // The retrieved string describes the action that is performed on an object,
-   // not what the object does as a result. For example, a toolbar button that prints
-   // a document has a default action of "Press" rather than "Prints the current document."
-   wxAccStatus GetDefaultAction(int childId, wxString *actionName) override;
-
-   // Returns the description for this object or a child.
-   wxAccStatus GetDescription(int childId, wxString *description) override;
-
-   // Gets the window with the keyboard focus.
-   // If childId is 0 and child is NULL, no object in
-   // this subhierarchy has the focus.
-   // If this object has the focus, child should be 'this'.
-   wxAccStatus GetFocus(int *childId, wxAccessible **child) override;
-
-   // Returns help text for this object or a child, similar to tooltip text.
-   wxAccStatus GetHelpText(int childId, wxString *helpText) override;
-
-   // Returns the keyboard shortcut for this object or child.
-   // Return e.g. ALT+K
-   wxAccStatus GetKeyboardShortcut(int childId, wxString *shortcut) override;
-
-   // Returns the rectangle for this object (id = 0) or a child element (id > 0).
-   // rect is in screen coordinates.
-   wxAccStatus GetLocation(wxRect& rect, int elementId) override;
-
-   // Gets the name of the specified object.
-   wxAccStatus GetName(int childId, wxString *name) override;
-
-   // Returns a role constant.
-   wxAccStatus GetRole(int childId, wxAccRole *role) override;
-
-   // Gets a variant representing the selected children
-   // of this object.
-   // Acceptable values:
-   // - a null variant (IsNull() returns TRUE)
-   // - a list variant (GetType() == wxT("list"))
-   // - an integer representing the selected child element,
-   //   or 0 if this object is selected (GetType() == wxT("long"))
-   // - a "void*" pointer to a wxAccessible child object
-   wxAccStatus GetSelections(wxVariant *selections) override;
-
-   // Returns a state constant.
-   wxAccStatus GetState(int childId, long* state) override;
-
-   // Returns a localized string representing the value for the object
-   // or child.
-   wxAccStatus GetValue(int childId, wxString* strValue) override;
-
-};
-
-#endif // wxUSE_ACCESSIBILITY
 
 #endif

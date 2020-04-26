@@ -7,7 +7,7 @@
  *
  */
 
-#include "../Audacity.h"
+#include "../Audacity.h" // for USE_* macros
 #include "ODDecodeFlacTask.h"
 
 #include "../Prefs.h"
@@ -15,6 +15,7 @@
 #include <wx/utils.h>
 #include <wx/file.h>
 #include <wx/ffile.h>
+#include <wx/wx.h>
 
 #ifdef USE_LIBID3TAG
 extern "C" {
@@ -26,16 +27,14 @@ extern "C" {
 
 #define FLAC_HEADER "fLaC"
 
-#define DESC _("FLAC files")
-
 ODDecodeFlacTask::~ODDecodeFlacTask()
 {
 }
 
 
-movable_ptr<ODTask> ODDecodeFlacTask::Clone() const
+std::unique_ptr<ODTask> ODDecodeFlacTask::Clone() const
 {
-   auto clone = make_movable<ODDecodeFlacTask>();
+   auto clone = std::make_unique<ODDecodeFlacTask>();
    clone->mDemandSample = GetDemandSample();
 
    //the decoders and blockfiles should not be copied.  They are created as the task runs.
@@ -50,7 +49,7 @@ void ODFLACFile::metadata_callback(const FLAC__StreamMetadata *metadata)
    {
       case FLAC__METADATA_TYPE_VORBIS_COMMENT:
          for (FLAC__uint32 i = 0; i < metadata->data.vorbis_comment.num_comments; i++) {
-            mComments.Add(UTF8CTOWX((char *)metadata->data.vorbis_comment.comments[i].entry));
+            mComments.push_back(UTF8CTOWX((char *)metadata->data.vorbis_comment.comments[i].entry));
          }
       break;
 
@@ -304,7 +303,7 @@ ODFileDecoder* ODDecodeFlacTask::CreateFileDecoder(const wxString & fileName)
    }
 
    // Open the file for import
-   auto decoder = std::make_movable<ODFlacDecoder>(fileName);
+   auto decoder = std::std::make_unique<ODFlacDecoder>(fileName);
 */
 /*
    bool success = decoder->Init();
@@ -313,7 +312,7 @@ ODFileDecoder* ODDecodeFlacTask::CreateFileDecoder(const wxString & fileName)
    }
 */
    // Open the file for import
-   auto decoder = make_movable<ODFlacDecoder>(fileName);
+   auto decoder = std::make_unique<ODFlacDecoder>(fileName);
 
    mDecoders.push_back(std::move(decoder));
    return mDecoders.back().get();

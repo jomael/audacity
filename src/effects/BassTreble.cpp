@@ -16,16 +16,22 @@
 
 #include "../Audacity.h"
 #include "BassTreble.h"
+#include "LoadEffects.h"
+
+#include "../Experimental.h"
 
 #include <math.h>
 #include <algorithm>
 
 #include <wx/button.h>
+#include <wx/checkbox.h>
 #include <wx/intl.h>
 #include <wx/panel.h>
 #include <wx/sizer.h>
+#include <wx/slider.h>
 
 #include "../Prefs.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../WaveTrack.h"
 #include "../widgets/valnum.h"
@@ -53,6 +59,11 @@ enum kShelfType
    kTreble
 };
 
+const ComponentInterfaceSymbol EffectBassTreble::Symbol
+{ XO("Bass and Treble") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectBassTreble > reg; }
+
 BEGIN_EVENT_TABLE(EffectBassTreble, wxEvtHandler)
    EVT_SLIDER(ID_Bass,     EffectBassTreble::OnBassSlider)
    EVT_SLIDER(ID_Treble,   EffectBassTreble::OnTrebleSlider)
@@ -77,16 +88,16 @@ EffectBassTreble::~EffectBassTreble()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectBassTreble::GetSymbol()
+ComponentInterfaceSymbol EffectBassTreble::GetSymbol()
 {
-   return BASSTREBLE_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectBassTreble::GetDescription()
+TranslatableString EffectBassTreble::GetDescription()
 {
-   return _("Simple tone control effect");
+   return XO("Simple tone control effect");
 }
 
 wxString EffectBassTreble::ManualPage()
@@ -215,60 +226,63 @@ void EffectBassTreble::PopulateOrExchange(ShuttleGui & S)
    S.SetBorder(5);
    S.AddSpace(0, 5);
 
-   S.StartStatic(_("Tone controls"));
+   S.StartStatic(XO("Tone controls"));
    {
       S.StartMultiColumn(3, wxEXPAND);
       {
          S.SetStretchyCol(2);
 
          // Bass control
-         FloatingPointValidator<double> vldBass(1, &mBass);
-         vldBass.SetRange(MIN_Bass, MAX_Bass);
-         mBassT = S.Id(ID_Bass).AddTextBox(_("Ba&ss (dB):"), wxT(""), 10);
-         mBassT->SetName(_("Bass (dB):"));
-         mBassT->SetValidator(vldBass);
+         mBassT = S.Id(ID_Bass)
+            .Name(XO("Bass (dB):"))
+            .Validator<FloatingPointValidator<double>>(
+               1, &mBass, NumValidatorStyle::DEFAULT, MIN_Bass, MAX_Bass)
+            .AddTextBox(XO("Ba&ss (dB):"), wxT(""), 10);
 
-         S.SetStyle(wxSL_HORIZONTAL);
-         mBassS = S.Id(ID_Bass).AddSlider( {}, 0, MAX_Bass * SCL_Bass, MIN_Bass * SCL_Bass);
-         mBassS->SetName(_("Bass"));
+         mBassS = S.Id(ID_Bass)
+            .Name(XO("Bass"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {}, 0, MAX_Bass * SCL_Bass, MIN_Bass * SCL_Bass);
 
          // Treble control
-         FloatingPointValidator<double> vldTreble(1, &mTreble);
-         vldTreble.SetRange(MIN_Treble, MAX_Treble);
-         mTrebleT = S.Id(ID_Treble).AddTextBox(_("&Treble (dB):"), wxT(""), 10);
-         mTrebleT->SetValidator(vldTreble);
+         mTrebleT = S.Id(ID_Treble)
+            .Validator<FloatingPointValidator<double>>(
+               1, &mTreble, NumValidatorStyle::DEFAULT, MIN_Treble, MAX_Treble)
+            .AddTextBox(XO("&Treble (dB):"), wxT(""), 10);
 
-         S.SetStyle(wxSL_HORIZONTAL);
-         mTrebleS = S.Id(ID_Treble).AddSlider( {}, 0, MAX_Treble * SCL_Treble, MIN_Treble * SCL_Treble);
-         mTrebleS->SetName(_("Treble"));
+         mTrebleS = S.Id(ID_Treble)
+            .Name(XO("Treble"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {}, 0, MAX_Treble * SCL_Treble, MIN_Treble * SCL_Treble);
       }
       S.EndMultiColumn();
    }
    S.EndStatic();
 
-   S.StartStatic(_("Output"));
+   S.StartStatic(XO("Output"));
    {
       S.StartMultiColumn(3, wxEXPAND);
       {
          S.SetStretchyCol(2);
 
          // Gain control
-         FloatingPointValidator<double> vldGain(1, &mGain);
-         vldGain.SetRange(MIN_Gain, MAX_Gain);
-         mGainT = S.Id(ID_Gain).AddTextBox(_("&Volume (dB):"), wxT(""), 10);
-         mGainT->SetValidator(vldGain);
+         mGainT = S.Id(ID_Gain)
+            .Validator<FloatingPointValidator<double>>(
+               1, &mGain, NumValidatorStyle::DEFAULT, MIN_Gain, MAX_Gain)
+            .AddTextBox(XO("&Volume (dB):"), wxT(""), 10);
 
-         S.SetStyle(wxSL_HORIZONTAL);
-         mGainS = S.Id(ID_Gain).AddSlider( {}, 0, MAX_Gain * SCL_Gain, MIN_Gain * SCL_Gain);
-         mGainS->SetName(_("Level"));
+         mGainS = S.Id(ID_Gain)
+            .Name(XO("Level"))
+            .Style(wxSL_HORIZONTAL)
+            .AddSlider( {}, 0, MAX_Gain * SCL_Gain, MIN_Gain * SCL_Gain);
       }
       S.EndMultiColumn();
 
       S.StartMultiColumn(2, wxCENTER);
       {
          // Link checkbox
-         mLinkCheckBox = S.Id(ID_Link).AddCheckBox(_("&Link Volume control to Tone controls"),
-                                          DEF_Link ? wxT("true") : wxT("false"));
+         mLinkCheckBox = S.Id(ID_Link).AddCheckBox(XO("&Link Volume control to Tone controls"),
+                                          DEF_Link);
       }
       S.EndMultiColumn();
    }
@@ -358,13 +372,13 @@ size_t EffectBassTreble::InstanceProcess(EffectBassTrebleState & data,
 
    data.gain = DB_TO_LINEAR(mGain);
 
-   // Compute coefficents of the low shelf biquand IIR filter
+   // Compute coefficients of the low shelf biquand IIR filter
    if (data.bass != oldBass)
       Coefficents(data.hzBass, data.slope, mBass, data.samplerate, kBass,
                   data.a0Bass, data.a1Bass, data.a2Bass,
                   data.b0Bass, data.b1Bass, data.b2Bass);
 
-   // Compute coefficents of the high shelf biquand IIR filter
+   // Compute coefficients of the high shelf biquand IIR filter
    if (data.treble != oldTreble)
       Coefficents(data.hzTreble, data.slope, mTreble, data.samplerate, kTreble,
                   data.a0Treble, data.a1Treble, data.a2Treble,

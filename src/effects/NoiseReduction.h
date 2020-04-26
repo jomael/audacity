@@ -15,22 +15,19 @@
 
 #include "Effect.h"
 
-#include "../MemoryX.h"
-
-#define NOISEREDUCTION_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Noise Reduction") }
-
 class EffectNoiseReduction final : public Effect {
 public:
+   static const ComponentInterfaceSymbol Symbol;
 
    EffectNoiseReduction();
    virtual ~EffectNoiseReduction();
 
    using Effect::TrackProgress;
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 
@@ -40,7 +37,8 @@ public:
 
 //   using Effect::TrackProgress;
 
-   bool PromptUser(wxWindow *parent) override;
+   bool ShowInterface( wxWindow &parent,
+      const EffectDialogFactory &factory, bool forceModal = false) override;
 
    bool Init() override;
    bool CheckWhetherSkipEffect() override;

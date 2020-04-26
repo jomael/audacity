@@ -18,6 +18,12 @@
 \brief The widget to the left of a ToolBar that allows it to be dragged
 around to NEW positions.
 
+*//*******************************************************************//**
+
+\class AStaticBitmap
+\brief A widget for bitmaps which ignores the erase event for 
+flicker-free use.
+
 *//**********************************************************************/
 
 #ifndef __AUDACITY_WIDGETS_GRABBER__
@@ -25,12 +31,10 @@ around to NEW positions.
 
 #include "../Audacity.h"
 
-#include "wx/defs.h"
-#include "wx/dc.h"
-#include "wx/event.h"
-#include "wx/gdicmn.h"
-#include "wx/window.h"
-#include <wx/statbmp.h>
+#include <wx/defs.h>
+#include <wx/statbmp.h> // to inherit
+
+class TranslatableString;
 
 ////////////////////////////////////////////////////////////
 /// Grabber Class
@@ -113,6 +117,9 @@ class Grabber final : public wxWindow
 
    void PushButton(bool state);
    void SetAsSpacer( bool bIsSpacer );
+
+   // overload and hide the inherited function that takes naked wxString:
+   void SetToolTip(const TranslatableString &toolTip);
 
  protected:
 

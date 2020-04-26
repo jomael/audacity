@@ -43,15 +43,8 @@
 #define __AUDACITY_MODULEINTERFACE_H__
 
 #include <functional>
-
-#ifdef __WXMAC__
-// Needs this for std::function
-// Make this go away when Mac moves to a proper C++11 library
-#include "../../src/MemoryX.h"
-#endif
-
 #include "audacity/Types.h"
-#include "audacity/IdentInterface.h"
+#include "audacity/ComponentInterface.h"
 #include "audacity/PluginInterface.h"
 
 // ============================================================================
@@ -71,7 +64,7 @@
 ///
 // ============================================================================
 
-class ModuleInterface  /* not final */ : public IdentInterface
+class ModuleInterface  /* not final */ : public ComponentInterface
 {
 public:
    virtual ~ModuleInterface() {};
@@ -83,6 +76,11 @@ public:
    // Called just prior to deletion to allow releasing any resources.
    virtual void Terminate() = 0;
 
+   // A symbol identifying the family of plugin provided by this module;
+   // if it is not empty, then the family as a whole can be enabled or
+   // disabled by the user in Preferences
+   virtual EffectFamilySymbol GetOptionalFamilySymbol() = 0;
+
    // "Paths" returned by FindPluginPaths() and passed back to
    // DiscoverPluginsAtPath() have module-specific meaning.
    // They are not necessarily file system paths to existent files that
@@ -91,12 +89,12 @@ public:
    // This function returns nonempty only when that is the case, and lists
    // the possible extensions of such files (an empty string in a nonempty
    // array means any file is a candidate).
-   virtual wxArrayString FileExtensions() = 0;
+   virtual const FileExtensions &GetFileExtensions() = 0;
 
    // Returns empty, or else, where to copy a plug-in file or bundle.
-   // Drag-and-drop is supported only if FileExtensions() returns nonempty and
+   // Drag-and-drop is supported only if GetFileExtensions() returns nonempty and
    // this function returns nonempty.
-   virtual wxString InstallPath() = 0;
+   virtual FilePath InstallPath() = 0;
 
    // Modules providing a single or static set of plugins may use
    // AutoRegisterPlugins() to register those plugins.
@@ -105,12 +103,12 @@ public:
    // For modules providing an interface to other dynamically loaded plugins,
    // the module returns a list of path names that will be presented to the
    // user as "New" for enablement.
-   virtual wxArrayString FindPluginPaths(PluginManagerInterface & pluginManager) = 0;
+   virtual PluginPaths FindPluginPaths(PluginManagerInterface & pluginManager) = 0;
 
    // Once the user selects desired paths from FindPluginPaths(),
    // a call to DiscoverPluginsAtPath()
    // will be made to request registration of one or more plugins.  If the module must create
-   // an instance of the plugin to register it, then then instance should be deleted
+   // an instance of the plugin to register it, then the instance should be deleted
    // after registration.
    // May discover more than one plug-in at the path, and
    // may call-back with paths not equal to path (perhaps appending
@@ -120,21 +118,21 @@ public:
    // Return value is the number of plugins found.
    using RegistrationCallback =
       std::function<
-         const PluginID &(ModuleInterface *, IdentInterface *) >;
+         const PluginID &(ModuleInterface *, ComponentInterface *) >;
    virtual unsigned DiscoverPluginsAtPath(
-      const wxString & path, wxString &errMsg,
+      const PluginPath & path, TranslatableString &errMsg,
       const RegistrationCallback &callback )
          = 0;
 
    // For modules providing an interface to other dynamically loaded plugins,
    // the module returns true if the plugin is still valid, otherwise false.
-   virtual bool IsPluginValid(const wxString & path, bool bFast) = 0;
+   virtual bool IsPluginValid(const PluginPath & path, bool bFast) = 0;
 
    // When appropriate, CreateInstance() will be called to instantiate the plugin.
-   virtual IdentInterface *CreateInstance(const wxString & path) = 0;
+   virtual ComponentInterface *CreateInstance(const PluginPath & path) = 0;
 
    // When appropriate, DeleteInstance() will be called to delete the plugin.
-   virtual void DeleteInstance(IdentInterface *instance) = 0;
+   virtual void DeleteInstance(ComponentInterface *instance) = 0;
 };
 
 // ============================================================================

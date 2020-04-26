@@ -22,6 +22,7 @@ but it will probably work fine if you use it on a high level.
 
 #include "Audacity.h"
 #include "Profiler.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <wx/crt.h>
@@ -96,7 +97,7 @@ TaskProfile* Profiler::GetOrCreateTaskProfile(const char* fileName, int lineNum)
          return mTasks[i].get();
    }
 
-   auto tp = make_movable<TaskProfile>();
+   auto tp = std::make_unique<TaskProfile>();
    mTasks.push_back(std::move(tp));
    return mTasks.back().get();
 }

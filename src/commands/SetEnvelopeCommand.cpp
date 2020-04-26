@@ -18,13 +18,19 @@
 
 #include "../Audacity.h"
 #include "SetEnvelopeCommand.h"
-#include "../Project.h"
-#include "../Track.h"
-#include "../TrackPanel.h"
+
+#include "LoadCommands.h"
+#include "../WaveClip.h"
 #include "../WaveTrack.h"
 #include "../Envelope.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
-#include "CommandContext.h"
+
+const ComponentInterfaceSymbol SetEnvelopeCommand::Symbol
+{ XO("Set Envelope") };
+
+namespace{ BuiltinCommandsModule::Registration< SetEnvelopeCommand > reg; }
+
 
 SetEnvelopeCommand::SetEnvelopeCommand()
 {
@@ -44,42 +50,38 @@ void SetEnvelopeCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(3, wxALIGN_CENTER);
    {
-      S.Optional( bHasT           ).TieNumericTextBox(  _("Time:"),          mT );
-      S.Optional( bHasV           ).TieNumericTextBox(  _("Value:"),         mV );
-      S.Optional( bHasDelete      ).TieCheckBox(        _("Delete:"),        mbDelete );
+      S.Optional( bHasT           ).TieNumericTextBox(  XO("Time:"),          mT );
+      S.Optional( bHasV           ).TieNumericTextBox(  XO("Value:"),         mV );
+      S.Optional( bHasDelete      ).TieCheckBox(        XO("Delete"),         mbDelete );
    }
    S.EndMultiColumn();
 }
 
-bool SetEnvelopeCommand::ApplyInner( const CommandContext & context, Track * t )
+bool SetEnvelopeCommand::ApplyInner( const CommandContext &, Track * t )
 {
-   static_cast<void>(context);
-   if( (t->GetKind() != Track::Wave)) 
-      return true;
-
-   // if no time is specified, then 
+   // if no time is specified, then
    //   - delete deletes any envelope in selected tracks.
    //   - value is not set for any clip
-
-   WaveTrack *waveTrack = static_cast<WaveTrack*>(t);
-   WaveClipPointers ptrs( waveTrack->SortedClipArray());
-   for(auto it = ptrs.begin(); (it != ptrs.end()); it++ ){
-      WaveClip * pClip = *it;
-      bool bFound = 
-         !bHasT || (
-            ( pClip->GetStartTime() <= mT) &&
-            ( pClip->GetEndTime() >= mT )
-         );
-      if( bFound )
-      {
-         // Inside this IF is where we actually apply the command
-         Envelope* pEnv = pClip->GetEnvelope();
-         if( bHasDelete && mbDelete )
-            pEnv->mEnv.clear();
-         if( bHasT && bHasV )
-            pEnv->InsertOrReplace( mT, mV );
+   t->TypeSwitch([&](WaveTrack *waveTrack) {
+      WaveClipPointers ptrs( waveTrack->SortedClipArray());
+      for(auto it = ptrs.begin(); (it != ptrs.end()); it++ ){
+         WaveClip * pClip = *it;
+         bool bFound =
+            !bHasT || (
+               ( pClip->GetStartTime() <= mT) &&
+               ( pClip->GetEndTime() >= mT )
+            );
+         if( bFound )
+         {
+            // Inside this IF is where we actually apply the command
+            Envelope* pEnv = pClip->GetEnvelope();
+            if( bHasDelete && mbDelete )
+               pEnv->Clear();
+            if( bHasT && bHasV )
+               pEnv->InsertOrReplace( mT, pEnv->ClampValue( mV ) );
+         }
       }
-   }
+   } );
 
    return true;
 }

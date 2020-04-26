@@ -13,36 +13,23 @@
 #define __AUDACITY_MACROS_WINDOW__
 
 #include <wx/defs.h>
-#include <wx/string.h>
-
-
-#ifdef __WXMSW__
-    #include  <wx/ownerdrw.h>
-#endif
-
-//#include  "wx/log.h"
-#include  <wx/sizer.h>
-#include  <wx/menuitem.h>
-#include  <wx/checklst.h>
 
 #include "BatchCommands.h"
 
 class wxWindow;
-class wxCheckBox;
-class wxChoice;
 class wxTextCtrl;
-class wxStaticText;
-class wxRadioButton;
 class wxListCtrl;
 class wxListEvent;
 class wxButton;
 class wxTextCtrl;
+class AudacityProject;
 class ShuttleGui;
 
 class ApplyMacroDialog : public wxDialogWrapper {
  public:
    // constructors and destructors
-   ApplyMacroDialog(wxWindow * parent, bool bInherited=false);
+   ApplyMacroDialog(
+      wxWindow * parent, AudacityProject &project, bool bInherited=false);
    virtual ~ApplyMacroDialog();
  public:
    // Populate methods NOT virtual.
@@ -56,9 +43,9 @@ class ApplyMacroDialog : public wxDialogWrapper {
    virtual wxString GetHelpPageName() {return "Apply_Macro";};
 
    void PopulateMacros();
-   static wxString MacroIdOfName( const wxString & MacroName );
+   static CommandID MacroIdOfName( const wxString & MacroName );
    void ApplyMacroToProject( int iMacro, bool bHasGui=true );
-   void ApplyMacroToProject( const wxString & MacroID, bool bHasGui=true );
+   void ApplyMacroToProject( const CommandID & MacroID, bool bHasGui=true );
 
 
    // These will be reused in the derived class...
@@ -73,8 +60,10 @@ class ApplyMacroDialog : public wxDialogWrapper {
    bool mAbort;
    bool mbExpanded;
    wxString mActiveMacro;
+   wxString mMacroBeingRenamed;
 
 protected:
+   AudacityProject &mProject;
    const MacroCommandsCatalog mCatalog;
 
    DECLARE_EVENT_TABLE()
@@ -83,11 +72,14 @@ protected:
 class MacrosWindow final : public ApplyMacroDialog
 {
 public:
-   MacrosWindow(wxWindow * parent, bool bExpanded=true);
+   MacrosWindow(
+      wxWindow * parent, AudacityProject &project, bool bExpanded=true);
    ~MacrosWindow();
    void UpdateDisplay( bool bExpanded );
 
 private:
+   TranslatableString WindowTitle() const;
+
    void Populate();
    void PopulateOrExchange(ShuttleGui &S);
    void OnApplyToProject(wxCommandEvent & event) override;
@@ -99,7 +91,7 @@ private:
          : "Apply_Macro";};
 
    void PopulateList();
-   void AddItem(const wxString &command, wxString const &params);
+   void AddItem(const CommandID &command, wxString const &params);
    bool ChangeOK();
    void UpdateMenus();
 
@@ -110,6 +102,7 @@ private:
    void OnAdd(wxCommandEvent &event);
    void OnRemove(wxCommandEvent &event);
    void OnRename(wxCommandEvent &event);
+   void OnRestore(wxCommandEvent &event);
    void OnExpand(wxCommandEvent &event);
    void OnShrink(wxCommandEvent &event);
    void OnSize(wxSizeEvent &event);
@@ -121,7 +114,6 @@ private:
    void OnDelete(wxCommandEvent &event);
    void OnUp(wxCommandEvent &event);
    void OnDown(wxCommandEvent &event);
-   void OnDefaults(wxCommandEvent &event);
 
    void OnOK(wxCommandEvent &event);
 
@@ -130,9 +122,11 @@ private:
    void InsertCommandAt(int item);
    bool SaveChanges();
 
+   AudacityProject &mProject;
+
    wxButton *mRemove;
    wxButton *mRename;
-   wxButton *mDefaults;
+   wxButton *mRestore;
 
    int mSelectedCommand;
    bool mChanged;

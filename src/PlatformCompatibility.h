@@ -20,7 +20,7 @@
 #ifndef __AUDACITY_COMPATIBILITY__
 #define __AUDACITY_COMPATIBILITY__
 
-#include <wx/string.h>
+#include "audacity/Types.h"
 
 class PlatformCompatibility
 {
@@ -31,17 +31,17 @@ public:
    // "C:\PROGRA~1\PROJEC~1.AUP. On other systems, the function
    // just returns the exact string it is given.
    //
-   static wxString GetLongFileName(const wxString& shortFileName);
+   static FilePath GetLongFileName(const FilePath& shortFileName);
 
    //
    // Get filename and path of executable (e.g. "/usr/bin/audacity" on
    // Linux or "C:\Program Files\Audacity\Audacity.exe" on Windows)
    // This string is unchanging
    //
-   static const wxString &GetExecutablePath();
+   static const FilePath &GetExecutablePath();
 
    //
-   // Audacity treats the / as a file seperator always for Mac OS,
+   // Audacity treats the / as a file separator always for Mac OS,
    // however /'s are allowed in the filename. In order for /'s to
    // work they muse be treated as :'s. To facilitate this, this
    // function should be called when opening or saving a file on
@@ -51,7 +51,7 @@ public:
    // of that directory. This function also exists in the FileDialogPrivate
    // object
    //
-   static wxString ConvertSlashInFileName(const wxString& filePath);
+   static FilePath ConvertSlashInFileName(const FilePath& filePath);
 };
 
 #endif

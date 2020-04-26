@@ -28,6 +28,11 @@ Track classes.
 
 
 #include "WaveTrack.h"
+
+#include "Experimental.h"
+
+#include "WaveClip.h"
+
 #include <wx/defs.h>
 #include <wx/intl.h>
 #include <wx/debug.h>
@@ -35,7 +40,6 @@ Track classes.
 #include <float.h>
 #include <math.h>
 #include <algorithm>
-#include "MemoryX.h"
 
 #include "float_cast.h"
 
@@ -44,70 +48,63 @@ Track classes.
 #include "Spectrum.h"
 
 #include "Project.h"
-#include "Internat.h"
+#include "ProjectFileIORegistry.h"
+#include "ProjectSettings.h"
 
-#include "AudioIO.h"
 #include "Prefs.h"
 
-#include "ondemand/ODManager.h"
-
 #include "effects/TimeWarper.h"
-#include "prefs/SpectrumPrefs.h"
+#include "prefs/QualityPrefs.h"
+#include "prefs/SpectrogramSettings.h"
 #include "prefs/TracksPrefs.h"
-#include "prefs/WaveformPrefs.h"
+#include "prefs/TracksBehaviorsPrefs.h"
+#include "prefs/WaveformSettings.h"
 
 #include "InconsistencyException.h"
 
-#include "Experimental.h"
-
-#include "TrackPanel.h" // for TrackInfo
-// Assumptions in objects separation were wrong.  We need to activate
-// VZooming (that lives in WaveTrackVRulerHandle) from an action on the
-// TCP collapse/expand.  So we need visibility here.
-#include "tracks/playabletrack/wavetrack/ui/WaveTrackVRulerControls.h"
+#include "tracks/ui/TrackView.h"
+#include "tracks/ui/TrackControls.h"
 
 using std::max;
 
+static ProjectFileIORegistry::Entry registerFactory{
+   wxT( "wavetrack" ),
+   []( AudacityProject &project ){
+      auto &trackFactory = TrackFactory::Get( project );
+      auto &tracks = TrackList::Get( project );
+      auto result = tracks.Add(trackFactory.NewWaveTrack());
+      TrackView::Get( *result );
+      TrackControls::Get( *result );
+      return result;
+   }
+};
+
 WaveTrack::Holder TrackFactory::DuplicateWaveTrack(const WaveTrack &orig)
 {
-   return std::unique_ptr<WaveTrack>
-   { static_cast<WaveTrack*>(orig.Duplicate().release()) };
+   return std::static_pointer_cast<WaveTrack>( orig.Duplicate() );
 }
 
 
 WaveTrack::Holder TrackFactory::NewWaveTrack(sampleFormat format, double rate)
 {
-   return std::unique_ptr<WaveTrack>
-   { safenew WaveTrack(mDirManager, format, rate) };
+   if (format == (sampleFormat)0)
+      format = QualityPrefs::SampleFormatChoice();
+   if (rate == 0)
+      rate = mSettings.GetRate();
+   return std::make_shared<WaveTrack> ( mDirManager, format, rate );
 }
 
 WaveTrack::WaveTrack(const std::shared_ptr<DirManager> &projDirManager, sampleFormat format, double rate) :
    PlayableTrack(projDirManager)
 {
-   if (format == (sampleFormat)0)
-   {
-      format = GetActiveProject()->GetDefaultFormat();
-   }
-   if (rate == 0)
-   {
-      rate = GetActiveProject()->GetRate();
-   }
-
-   // Force creation always:
-   WaveformSettings &settings = GetIndependentWaveformSettings();
-
-   mDisplay = TracksPrefs::ViewModeChoice();
-   if (mDisplay == obsoleteWaveformDBDisplay) {
-      mDisplay = Waveform;
-      settings.scaleType = WaveformSettings::stLogarithmic;
-   }
-
    mLegacyProjectFileOffset = 0;
 
    mFormat = format;
    mRate = (int) rate;
    mGain = 1.0;
    mPan = 0.0;
+   mOldGain[0] = 0.0;
+   mOldGain[1] = 0.0;
    mWaveColorIndex = 0;
    SetDefaultName(TracksPrefs::GetDefaultAudioTrackNamePreference());
    SetName(GetDefaultName());
@@ -117,8 +114,6 @@ WaveTrack::WaveTrack(const std::shared_ptr<DirManager> &projDirManager, sampleFo
    mLastScaleType = -1;
    mLastdBRange = -1;
    mAutoSaveIdent = 0;
-
-   SetHeight( TrackInfo::DefaultWaveTrackHeight() );
 }
 
 WaveTrack::WaveTrack(const WaveTrack &orig):
@@ -141,7 +136,7 @@ WaveTrack::WaveTrack(const WaveTrack &orig):
 
    for (const auto &clip : orig.mClips)
       mClips.push_back
-         ( make_movable<WaveClip>( *clip, mDirManager, true ) );
+         ( std::make_unique<WaveClip>( *clip, mDirManager, true ) );
 }
 
 // Copy the track metadata but not the contents.
@@ -153,9 +148,10 @@ void WaveTrack::Init(const WaveTrack &orig)
    mRate = orig.mRate;
    mGain = orig.mGain;
    mPan = orig.mPan;
+   mOldGain[0] = 0.0;
+   mOldGain[1] = 0.0;
    SetDefaultName(orig.GetDefaultName());
    SetName(orig.GetName());
-   mDisplay = orig.mDisplay;
    mDisplayMin = orig.mDisplayMin;
    mDisplayMax = orig.mDisplayMax;
    mSpectrumMin = orig.mSpectrumMin;
@@ -184,18 +180,12 @@ void WaveTrack::Reinit(const WaveTrack &orig)
    }
 
    this->SetOffset(orig.GetOffset());
-
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-   // To do:  mYv, mHeightV, mPerY, mVirtualStereo
-#endif
 }
 
 void WaveTrack::Merge(const Track &orig)
 {
-   if (orig.GetKind() == Wave)
-   {
-      const WaveTrack &wt = static_cast<const WaveTrack&>(orig);
-      mDisplay = wt.mDisplay;
+   orig.TypeSwitch( [&](const WaveTrack *pwt) {
+      const WaveTrack &wt = *pwt;
       mGain    = wt.mGain;
       mPan     = wt.mPan;
       mDisplayMin = wt.mDisplayMin;
@@ -204,16 +194,12 @@ void WaveTrack::Merge(const Track &orig)
          ? std::make_unique<SpectrogramSettings>(*wt.mpSpectrumSettings) : nullptr);
       SetWaveformSettings
          (wt.mpWaveformSettings ? std::make_unique<WaveformSettings>(*wt.mpWaveformSettings) : nullptr);
-   }
+   });
    PlayableTrack::Merge(orig);
 }
 
 WaveTrack::~WaveTrack()
 {
-   //Let the ODManager know this WaveTrack is disappearing.
-   //Deschedules tasks associated with this track.
-   if(ODManager::IsInstanceCreated())
-      ODManager::Instance()->RemoveWaveTrack(this);
 }
 
 double WaveTrack::GetOffset() const
@@ -233,7 +219,11 @@ void WaveTrack::SetOffset(double o)
    mOffset = o;
 }
 
-int WaveTrack::GetChannel() const 
+auto WaveTrack::GetChannelIgnoringPan() const -> ChannelType {
+   return mChannel;
+}
+
+auto WaveTrack::GetChannel() const -> ChannelType
 {
    if( mChannel != Track::MonoChannel )
       return mChannel; 
@@ -252,65 +242,6 @@ void WaveTrack::SetPanFromChannelType()
    else if( mChannel == Track::RightChannel )
       SetPan( 1.0f );
 };
-
-
-// static
-WaveTrack::WaveTrackDisplay
-WaveTrack::ConvertLegacyDisplayValue(int oldValue)
-{
-   // Remap old values.
-   enum OldValues {
-      Waveform,
-      WaveformDB,
-      Spectrogram,
-      SpectrogramLogF,
-      Pitch,
-   };
-
-   WaveTrackDisplay newValue;
-   switch (oldValue) {
-   default:
-   case Waveform:
-      newValue = WaveTrack::Waveform; break;
-   case WaveformDB:
-      newValue = WaveTrack::obsoleteWaveformDBDisplay; break;
-   case Spectrogram:
-   case SpectrogramLogF:
-   case Pitch:
-      newValue = WaveTrack::Spectrum; break;
-      /*
-   case SpectrogramLogF:
-      newValue = WaveTrack::SpectrumLogDisplay; break;
-   case Pitch:
-      newValue = WaveTrack::PitchDisplay; break;
-      */
-   }
-   return newValue;
-}
-
-// static
-WaveTrack::WaveTrackDisplay
-WaveTrack::ValidateWaveTrackDisplay(WaveTrackDisplay display)
-{
-   switch (display) {
-      // non-obsolete codes
-   case Waveform:
-   case obsoleteWaveformDBDisplay:
-   case Spectrum:
-      return display;
-
-      // obsolete codes
-   case obsolete1: // was SpectrumLogDisplay
-   case obsolete2: // was SpectralSelectionDisplay
-   case obsolete3: // was SpectralSelectionLogDisplay
-   case obsolete4: // was PitchDisplay
-      return Spectrum;
-
-      // codes out of bounds (from future prefs files?)
-   default:
-      return MinDisplay;
-   }
-}
 
 void WaveTrack::SetLastScaleType() const
 {
@@ -390,9 +321,9 @@ int WaveTrack::ZeroLevelYCoordinate(wxRect rect) const
       (int)((mDisplayMax / (mDisplayMax - mDisplayMin)) * rect.height);
 }
 
-Track::Holder WaveTrack::Duplicate() const
+Track::Holder WaveTrack::Clone() const
 {
-   return Track::Holder{ safenew WaveTrack{ *this } };
+   return std::make_shared<WaveTrack>( *this );
 }
 
 double WaveTrack::GetRate() const
@@ -419,7 +350,10 @@ float WaveTrack::GetGain() const
 
 void WaveTrack::SetGain(float newGain)
 {
-   mGain = newGain;
+   if (mGain != newGain) {
+      mGain = newGain;
+      Notify();
+   }
 }
 
 float WaveTrack::GetPan() const
@@ -430,11 +364,14 @@ float WaveTrack::GetPan() const
 void WaveTrack::SetPan(float newPan)
 {
    if (newPan > 1.0)
-      mPan = 1.0;
+      newPan = 1.0;
    else if (newPan < -1.0)
-      mPan = -1.0;
-   else
+      newPan = -1.0;
+
+   if ( mPan != newPan ) {
       mPan = newPan;
+      Notify();
+   }
 }
 
 float WaveTrack::GetChannelGain(int channel) const
@@ -453,26 +390,17 @@ float WaveTrack::GetChannelGain(int channel) const
       return right*mGain;
 }
 
-void WaveTrack::DoSetMinimized(bool isMinimized){
-
-#ifdef EXPERIMENTAL_HALF_WAVE
-   bool bHalfWave;
-   gPrefs->Read(wxT("/GUI/CollapseToHalfWave"), &bHalfWave, false);
-   if( bHalfWave )
-   {
-      // Show half wave on collapse, full on restore.
-      std::shared_ptr<TrackVRulerControls> pTvc = GetVRulerControls();
-
-      // An awkward workaround for a function that lives 'in the wrong place'.
-      // We use magic numbers, 0 and 1, to tell it to zoom reset or zoom half-wave.
-      WaveTrackVRulerControls * pWtvc = reinterpret_cast<WaveTrackVRulerControls*>(pTvc.get());
-      if( pWtvc )
-         pWtvc->DoZoomPreset( isMinimized ? 1:0);
-   }
-#endif
-
-   PlayableTrack::DoSetMinimized( isMinimized );
+float WaveTrack::GetOldChannelGain(int channel) const
+{
+   return mOldGain[channel%2];
 }
+
+void WaveTrack::SetOldChannelGain(int channel, float gain)
+{
+   mOldGain[channel % 2] = gain;
+}
+
+
 
 void WaveTrack::SetWaveColorIndex(int colorIndex)
 // STRONG-GUARANTEE
@@ -485,7 +413,7 @@ void WaveTrack::SetWaveColorIndex(int colorIndex)
 
 void WaveTrack::ConvertToSampleFormat(sampleFormat format)
 // WEAK-GUARANTEE
-// might complete on only some tracks
+// might complete on only some clips
 {
    for (const auto &clip : mClips)
       clip->ConvertToSampleFormat(format);
@@ -602,16 +530,20 @@ void WaveTrack::Trim (double t0, double t1)
 
 
 
+WaveTrack::Holder WaveTrack::EmptyCopy() const
+{
+   auto result = std::make_shared<WaveTrack>( mDirManager, mFormat, mRate );
+   result->Init(*this);
+   return result;
+}
+
 Track::Holder WaveTrack::Copy(double t0, double t1, bool forClipboard) const
 {
    if (t1 < t0)
       THROW_INCONSISTENCY_EXCEPTION;
 
-   WaveTrack *newTrack;
-   Track::Holder result
-   { newTrack = safenew WaveTrack{ mDirManager } };
-
-   newTrack->Init(*this);
+   auto result = EmptyCopy();
+   WaveTrack *newTrack = result.get();
 
    // PRL:  Why shouldn't cutlines be copied and pasted too?  I don't know, but
    // that was the old behavior.  But this function is also used by the
@@ -625,7 +557,7 @@ Track::Holder WaveTrack::Copy(double t0, double t1, bool forClipboard) const
          //wxPrintf("copy: clip %i is in copy region\n", (int)clip);
 
          newTrack->mClips.push_back
-            (make_movable<WaveClip>(*clip, mDirManager, ! forClipboard));
+            (std::make_unique<WaveClip>(*clip, mDirManager, ! forClipboard));
          WaveClip *const newClip = newTrack->mClips.back().get();
          newClip->Offset(-t0);
       }
@@ -637,7 +569,7 @@ Track::Holder WaveTrack::Copy(double t0, double t1, bool forClipboard) const
          const double clip_t0 = std::max(t0, clip->GetStartTime());
          const double clip_t1 = std::min(t1, clip->GetEndTime());
 
-         auto newClip = make_movable<WaveClip>
+         auto newClip = std::make_unique<WaveClip>
             (*clip, mDirManager, ! forClipboard, clip_t0, clip_t1);
 
          //wxPrintf("copy: clip_t0=%f, clip_t1=%f\n", clip_t0, clip_t1);
@@ -657,7 +589,7 @@ Track::Holder WaveTrack::Copy(double t0, double t1, bool forClipboard) const
    if (forClipboard &&
        newTrack->GetEndTime() + 1.0 / newTrack->GetRate() < t1 - t0)
    {
-      auto placeholder = make_movable<WaveClip>(mDirManager,
+      auto placeholder = std::make_unique<WaveClip>(mDirManager,
             newTrack->GetSampleFormat(),
             static_cast<int>(newTrack->GetRate()),
             0 /*colourindex*/);
@@ -770,7 +702,7 @@ void WaveTrack::SetWaveformSettings(std::unique_ptr<WaveformSettings> &&pSetting
 // followed by Paste() and is used mostly by effects that
 // can't replace track data directly using Get()/Set().
 //
-// HandleClear() removes any cut/split lines lines with the
+// HandleClear() removes any cut/split lines with the
 // cleared range, but, in most cases, effects want to preserve
 // the existing cut/split lines, so they are saved before the
 // HandleClear()/Paste() and restored after.
@@ -1014,7 +946,7 @@ void WaveTrack::HandleClear(double t0, double t1,
    if (t1 < t0)
       THROW_INCONSISTENCY_EXCEPTION;
 
-   bool editClipCanMove = gPrefs->GetEditClipsCanMove();
+   bool editClipCanMove = GetEditClipsCanMove();
 
    WaveClipPointers clipsToDelete;
    WaveClipHolders clipsToAdd;
@@ -1049,7 +981,7 @@ void WaveTrack::HandleClear(double t0, double t1,
             // Don't modify this clip in place, because we want a strong
             // guarantee, and might modify another clip
             clipsToDelete.push_back( clip.get() );
-            auto newClip = make_movable<WaveClip>( *clip, mDirManager, true );
+            auto newClip = std::make_unique<WaveClip>( *clip, mDirManager, true );
             newClip->ClearAndAddCutLine( t0, t1 );
             clipsToAdd.push_back( std::move( newClip ) );
          }
@@ -1064,7 +996,7 @@ void WaveTrack::HandleClear(double t0, double t1,
                   // Don't modify this clip in place, because we want a strong
                   // guarantee, and might modify another clip
                   clipsToDelete.push_back( clip.get() );
-                  auto newClip = make_movable<WaveClip>( *clip, mDirManager, true );
+                  auto newClip = std::make_unique<WaveClip>( *clip, mDirManager, true );
                   newClip->Clear(clip->GetStartTime(), t1);
                   newClip->Offset(t1-clip->GetStartTime());
 
@@ -1076,7 +1008,7 @@ void WaveTrack::HandleClear(double t0, double t1,
                   // Don't modify this clip in place, because we want a strong
                   // guarantee, and might modify another clip
                   clipsToDelete.push_back( clip.get() );
-                  auto newClip = make_movable<WaveClip>( *clip, mDirManager, true );
+                  auto newClip = std::make_unique<WaveClip>( *clip, mDirManager, true );
                   newClip->Clear(t0, clip->GetEndTime());
 
                   clipsToAdd.push_back( std::move( newClip ) );
@@ -1087,12 +1019,12 @@ void WaveTrack::HandleClear(double t0, double t1,
 
                   // left
                   clipsToAdd.push_back
-                     ( make_movable<WaveClip>( *clip, mDirManager, true ) );
+                     ( std::make_unique<WaveClip>( *clip, mDirManager, true ) );
                   clipsToAdd.back()->Clear(t0, clip->GetEndTime());
 
                   // right
                   clipsToAdd.push_back
-                     ( make_movable<WaveClip>( *clip, mDirManager, true ) );
+                     ( std::make_unique<WaveClip>( *clip, mDirManager, true ) );
                   WaveClip *const right = clipsToAdd.back().get();
                   right->Clear(clip->GetStartTime(), t1);
                   right->Offset(t1 - clip->GetStartTime());
@@ -1106,7 +1038,7 @@ void WaveTrack::HandleClear(double t0, double t1,
                // Don't modify this clip in place, because we want a strong
                // guarantee, and might modify another clip
                clipsToDelete.push_back( clip.get() );
-               auto newClip = make_movable<WaveClip>( *clip, mDirManager, true );
+               auto newClip = std::make_unique<WaveClip>( *clip, mDirManager, true );
 
                // clip->Clear keeps points < t0 and >= t1 via Envelope::CollapseRegion
                newClip->Clear(t0,t1);
@@ -1171,13 +1103,8 @@ void WaveTrack::SyncLockAdjust(double oldT1, double newT1)
       else {
          // AWD: Could just use InsertSilence() on its own here, but it doesn't
          // follow EditClipCanMove rules (Paste() does it right)
-         AudacityProject *p = GetActiveProject();
-         if (!p)
-            THROW_INCONSISTENCY_EXCEPTION;
-         TrackFactory *f = p->GetTrackFactory();
-         if (!f)
-            THROW_INCONSISTENCY_EXCEPTION;
-         auto tmp = f->NewWaveTrack(GetSampleFormat(), GetRate());
+         auto tmp = std::make_shared<WaveTrack>(
+            mDirManager, GetSampleFormat(), GetRate() );
 
          tmp->InsertSilence(0.0, newT1 - oldT1);
          tmp->Flush();
@@ -1192,160 +1119,159 @@ void WaveTrack::SyncLockAdjust(double oldT1, double newT1)
 void WaveTrack::Paste(double t0, const Track *src)
 // WEAK-GUARANTEE
 {
-   bool editClipCanMove = gPrefs->GetEditClipsCanMove();
-   
-   if( src == NULL )
-      // THROW_INCONSISTENCY_EXCEPTION; // ?
-      return;
+   bool editClipCanMove = GetEditClipsCanMove();
 
-   if (src->GetKind() != Track::Wave)
-      // THROW_INCONSISTENCY_EXCEPTION; // ?
-      return;
+   bool bOk = src && src->TypeSwitch< bool >( [&](const WaveTrack *other) {
 
-   const WaveTrack* other = static_cast<const WaveTrack*>(src);
+      //
+      // Pasting is a bit complicated, because with the existence of multiclip mode,
+      // we must guess the behaviour the user wants.
+      //
+      // Currently, two modes are implemented:
+      //
+      // - If a single clip should be pasted, and it should be pasted inside another
+      //   clip, no NEW clips are generated. The audio is simply inserted.
+      //   This resembles the old (pre-multiclip support) behaviour. However, if
+      //   the clip is pasted outside of any clip, a NEW clip is generated. This is
+      //   the only behaviour which is different to what was done before, but it
+      //   shouldn't confuse users too much.
+      //
+      // - If multiple clips should be pasted, or a single clip that does not fill
+      // the duration of the pasted track, these are always pasted as single
+      // clips, and the current clip is splitted, when necessary. This may seem
+      // strange at first, but it probably is better than trying to auto-merge
+      // anything. The user can still merge the clips by hand (which should be a
+      // simple command reachable by a hotkey or single mouse click).
+      //
 
-   //
-   // Pasting is a bit complicated, because with the existence of multiclip mode,
-   // we must guess the behaviour the user wants.
-   //
-   // Currently, two modes are implemented:
-   //
-   // - If a single clip should be pasted, and it should be pasted inside another
-   //   clip, no NEW clips are generated. The audio is simply inserted.
-   //   This resembles the old (pre-multiclip support) behaviour. However, if
-   //   the clip is pasted outside of any clip, a NEW clip is generated. This is
-   //   the only behaviour which is different to what was done before, but it
-   //   shouldn't confuse users too much.
-   //
-   // - If multiple clips should be pasted, or a single clip that does not fill
-   // the duration of the pasted track, these are always pasted as single
-   // clips, and the current clip is splitted, when necessary. This may seem
-   // strange at first, but it probably is better than trying to auto-merge
-   // anything. The user can still merge the clips by hand (which should be a
-   // simple command reachable by a hotkey or single mouse click).
-   //
+      if (other->GetNumClips() == 0)
+         return true;
 
-   if (other->GetNumClips() == 0)
-      return;
+      //wxPrintf("paste: we have at least one clip\n");
 
-   //wxPrintf("paste: we have at least one clip\n");
+      bool singleClipMode = (other->GetNumClips() == 1 &&
+            other->GetStartTime() == 0.0);
 
-   bool singleClipMode = (other->GetNumClips() == 1 &&
-         other->GetStartTime() == 0.0);
+      const double insertDuration = other->GetEndTime();
+      if( insertDuration != 0 && insertDuration < 1.0/mRate )
+         // PRL:  I added this check to avoid violations of preconditions in other WaveClip and Sequence
+         // methods, but allow the value 0 so I don't subvert the purpose of commit
+         // 739422ba70ceb4be0bb1829b6feb0c5401de641e which causes append-recording always to make
+         // a new clip.
+         return true;
 
-   const double insertDuration = other->GetEndTime();
-   if( insertDuration != 0 && insertDuration < 1.0/mRate )
-      // PRL:  I added this check to avoid violations of preconditions in other WaveClip and Sequence
-      // methods, but allow the value 0 so I don't subvert the purpose of commit
-      // 739422ba70ceb4be0bb1829b6feb0c5401de641e which causes append-recording always to make
-      // a new clip.
-      return;
+      //wxPrintf("Check if we need to make room for the pasted data\n");
 
-   //wxPrintf("Check if we need to make room for the pasted data\n");
-
-   // Make room for the pasted data
-   if (editClipCanMove) {
-      if (!singleClipMode) {
-         // We need to insert multiple clips, so split the current clip and
-         // move everything to the right, then try to paste again
-         if (!IsEmpty(t0, GetEndTime())) {
-            auto tmp = Cut(t0, GetEndTime()+1.0/mRate);
-            Paste(t0 + insertDuration, tmp.get());
-         }
-      }
-      else {
-         // We only need to insert one single clip, so just move all clips
-         // to the right of the paste point out of the way
-         for (const auto &clip : mClips)
-         {
-            if (clip->GetStartTime() > t0-(1.0/mRate))
-               clip->Offset(insertDuration);
-         }
-      }
-   }
-
-   if (singleClipMode)
-   {
-      // Single clip mode
-      // wxPrintf("paste: checking for single clip mode!\n");
-
-      WaveClip *insideClip = NULL;
-
-      for (const auto &clip : mClips)
-      {
-         if (editClipCanMove)
-         {
-            if (clip->WithinClip(t0))
-            {
-               //wxPrintf("t0=%.6f: inside clip is %.6f ... %.6f\n",
-               //       t0, clip->GetStartTime(), clip->GetEndTime());
-               insideClip = clip.get();
-               break;
+      // Make room for the pasted data
+      if (editClipCanMove) {
+         if (!singleClipMode) {
+            // We need to insert multiple clips, so split the current clip and
+            // move everything to the right, then try to paste again
+            if (!IsEmpty(t0, GetEndTime())) {
+               auto tmp = Cut(t0, GetEndTime()+1.0/mRate);
+               Paste(t0 + insertDuration, tmp.get());
             }
          }
-         else
-         {
-            // If clips are immovable we also allow prepending to clips
-            if (clip->WithinClip(t0) ||
-                  TimeToLongSamples(t0) == clip->GetStartSample())
-            {
-               insideClip = clip.get();
-               break;
-            }
-         }
-      }
-
-      if (insideClip)
-      {
-         // Exhibit traditional behaviour
-         //wxPrintf("paste: traditional behaviour\n");
-         if (!editClipCanMove)
-         {
-            // We did not move other clips out of the way already, so
-            // check if we can paste without having to move other clips
+         else {
+            // We only need to insert one single clip, so just move all clips
+            // to the right of the paste point out of the way
             for (const auto &clip : mClips)
             {
-               if (clip->GetStartTime() > insideClip->GetStartTime() &&
-                   insideClip->GetEndTime() + insertDuration >
-                                                      clip->GetStartTime())
-                  // STRONG-GUARANTEE in case of this path
-                  // not that it matters.
-                  throw SimpleMessageBoxException{
-                     _("There is not enough room available to paste the selection")
-                  };
+               if (clip->GetStartTime() > t0-(1.0/mRate))
+                  clip->Offset(insertDuration);
+            }
+         }
+      }
+
+      if (singleClipMode)
+      {
+         // Single clip mode
+         // wxPrintf("paste: checking for single clip mode!\n");
+
+         WaveClip *insideClip = NULL;
+
+         for (const auto &clip : mClips)
+         {
+            if (editClipCanMove)
+            {
+               if (clip->WithinClip(t0))
+               {
+                  //wxPrintf("t0=%.6f: inside clip is %.6f ... %.6f\n",
+                  //       t0, clip->GetStartTime(), clip->GetEndTime());
+                  insideClip = clip.get();
+                  break;
+               }
+            }
+            else
+            {
+               // If clips are immovable we also allow prepending to clips
+               if (clip->WithinClip(t0) ||
+                     TimeToLongSamples(t0) == clip->GetStartSample())
+               {
+                  insideClip = clip.get();
+                  break;
+               }
             }
          }
 
-         insideClip->Paste(t0, other->GetClipByIndex(0));
-         return;
+         if (insideClip)
+         {
+            // Exhibit traditional behaviour
+            //wxPrintf("paste: traditional behaviour\n");
+            if (!editClipCanMove)
+            {
+               // We did not move other clips out of the way already, so
+               // check if we can paste without having to move other clips
+               for (const auto &clip : mClips)
+               {
+                  if (clip->GetStartTime() > insideClip->GetStartTime() &&
+                      insideClip->GetEndTime() + insertDuration >
+                                                         clip->GetStartTime())
+                     // STRONG-GUARANTEE in case of this path
+                     // not that it matters.
+                     throw SimpleMessageBoxException{
+                        XO("There is not enough room available to paste the selection")
+                     };
+               }
+            }
+
+            insideClip->Paste(t0, other->GetClipByIndex(0));
+            return true;
+         }
+
+         // Just fall through and exhibit NEW behaviour
+
       }
 
-      // Just fall through and exhibit NEW behaviour
-   }
+      // Insert NEW clips
+      //wxPrintf("paste: multi clip mode!\n");
 
-   // Insert NEW clips
-   //wxPrintf("paste: multi clip mode!\n");
+      if (!editClipCanMove && !IsEmpty(t0, t0+insertDuration-1.0/mRate))
+         // STRONG-GUARANTEE in case of this path
+         // not that it matters.
+         throw SimpleMessageBoxException{
+            XO("There is not enough room available to paste the selection")
+         };
 
-   if (!editClipCanMove && !IsEmpty(t0, t0+insertDuration-1.0/mRate))
-      // STRONG-GUARANTEE in case of this path
-      // not that it matters.
-      throw SimpleMessageBoxException{
-         _("There is not enough room available to paste the selection")
-      };
-
-   for (const auto &clip : other->mClips)
-   {
-      // AWD Oct. 2009: Don't actually paste in placeholder clips
-      if (!clip->GetIsPlaceholder())
+      for (const auto &clip : other->mClips)
       {
-         auto newClip =
-            make_movable<WaveClip>( *clip, mDirManager, true );
-         newClip->Resample(mRate);
-         newClip->Offset(t0);
-         newClip->MarkChanged();
-         mClips.push_back(std::move(newClip)); // transfer ownership
+         // AWD Oct. 2009: Don't actually paste in placeholder clips
+         if (!clip->GetIsPlaceholder())
+         {
+            auto newClip =
+               std::make_unique<WaveClip>( *clip, mDirManager, true );
+            newClip->Resample(mRate);
+            newClip->Offset(t0);
+            newClip->MarkChanged();
+            mClips.push_back(std::move(newClip)); // transfer ownership
+         }
       }
-   }
+      return true;
+   } );
+
+   if( !bOk )
+      // THROW_INCONSISTENCY_EXCEPTION; // ?
+      (void)0;// Empty if intentional.
 }
 
 void WaveTrack::Silence(double t0, double t1)
@@ -1395,7 +1321,7 @@ void WaveTrack::InsertSilence(double t, double len)
    if (mClips.empty())
    {
       // Special case if there is no clip yet
-      auto clip = make_movable<WaveClip>(mDirManager, mFormat, mRate, this->GetWaveColorIndex());
+      auto clip = std::make_unique<WaveClip>(mDirManager, mFormat, mRate, this->GetWaveColorIndex());
       clip->InsertSilence(0, len);
       // use NOFAIL-GUARANTEE
       mClips.push_back( std::move( clip ) );
@@ -1565,32 +1491,6 @@ void WaveTrack::Append(samplePtr buffer, sampleFormat format,
                                         blockFileLog);
 }
 
-void WaveTrack::AppendAlias(const wxString &fName, sampleCount start,
-                            size_t len, int channel,bool useOD)
-// STRONG-GUARANTEE
-{
-   RightmostOrNewClip()->AppendAlias(fName, start, len, channel, useOD);
-}
-
-void WaveTrack::AppendCoded(const wxString &fName, sampleCount start,
-                            size_t len, int channel, int decodeType)
-// STRONG-GUARANTEE
-{
-   RightmostOrNewClip()->AppendCoded(fName, start, len, channel, decodeType);
-}
-
-///gets an int with OD flags so that we can determine which ODTasks should be run on this track after save/open, etc.
-unsigned int WaveTrack::GetODFlags() const
-{
-   unsigned int ret = 0;
-   for (const auto &clip : mClips)
-   {
-      ret = ret | clip->GetSequence()->GetODFlags();
-   }
-   return ret;
-}
-
-
 sampleCount WaveTrack::GetBlockStart(sampleCount s) const
 {
    for (const auto &clip : mClips)
@@ -1690,15 +1590,8 @@ bool WaveTrack::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
          }
          else if (this->PlayableTrack::HandleXMLAttribute(attr, value))
          {}
-         else if (!wxStrcmp(attr, wxT("height")) &&
-                  XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
-            mHeight = nValue;
-         else if (!wxStrcmp(attr, wxT("minimized")) &&
-                  XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
-            mMinimized = (nValue != 0);
-         else if (!wxStrcmp(attr, wxT("isSelected")) &&
-                  XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
-            this->SetSelected(nValue != 0);
+         else if (this->Track::HandleCommonXMLAttribute(attr, strValue))
+            ;
          else if (!wxStrcmp(attr, wxT("gain")) &&
                   XMLValueChecker::IsGoodString(strValue) &&
                   Internat::CompatibleToDouble(strValue, &dblValue))
@@ -1708,14 +1601,12 @@ bool WaveTrack::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
                   Internat::CompatibleToDouble(strValue, &dblValue) &&
                   (dblValue >= -1.0) && (dblValue <= 1.0))
             mPan = dblValue;
-         else if (!wxStrcmp(attr, wxT("name")) && XMLValueChecker::IsGoodString(strValue))
-            mName = strValue;
          else if (!wxStrcmp(attr, wxT("channel")))
          {
             if (!XMLValueChecker::IsGoodInt(strValue) || !strValue.ToLong(&nValue) ||
                   !XMLValueChecker::IsValidChannel(nValue))
                return false;
-            mChannel = nValue;
+            mChannel = static_cast<Track::ChannelType>( nValue );
          }
          else if (!wxStrcmp(attr, wxT("linked")) &&
                   XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
@@ -1786,13 +1677,10 @@ void WaveTrack::WriteXML(XMLWriter &xmlFile) const
    {
       xmlFile.WriteAttr(wxT("autosaveid"), mAutoSaveIdent);
    }
-   xmlFile.WriteAttr(wxT("name"), mName);
+   this->Track::WriteCommonXMLAttributes( xmlFile );
    xmlFile.WriteAttr(wxT("channel"), mChannel);
    xmlFile.WriteAttr(wxT("linked"), mLinked);
    this->PlayableTrack::WriteXMLAttributes(xmlFile);
-   xmlFile.WriteAttr(wxT("height"), this->GetActualHeight());
-   xmlFile.WriteAttr(wxT("minimized"), this->GetMinimized());
-   xmlFile.WriteAttr(wxT("isSelected"), this->GetSelected());
    xmlFile.WriteAttr(wxT("rate"), mRate);
    xmlFile.WriteAttr(wxT("gain"), (double)mGain);
    xmlFile.WriteAttr(wxT("pan"), (double)mPan);
@@ -1970,7 +1858,7 @@ float WaveTrack::GetRMS(double t0, double t1, bool mayThrow) const
 
 bool WaveTrack::Get(samplePtr buffer, sampleFormat format,
                     sampleCount start, size_t len, fillFormat fill,
-                    bool mayThrow, sampleCount * pNumCopied) const
+                    bool mayThrow, sampleCount * pNumWithinClips) const
 {
    // Simple optimization: When this buffer is completely contained within one clip,
    // don't clear anything (because we won't have to). Otherwise, just clear
@@ -2005,6 +1893,7 @@ bool WaveTrack::Get(samplePtr buffer, sampleFormat format,
       }
    }
 
+   // Iterate the clips.  They are not necessarily sorted by time.
    for (const auto &clip: mClips)
    {
       auto clipStart = clip->GetStartSample();
@@ -2030,7 +1919,7 @@ bool WaveTrack::Get(samplePtr buffer, sampleFormat format,
             // startDelta is zero
          }
          else {
-            // startDelta is nonnegative and less than than len
+            // startDelta is nonnegative and less than len
             // samplesToCopy is positive and not more than len
          }
 
@@ -2044,8 +1933,8 @@ bool WaveTrack::Get(samplePtr buffer, sampleFormat format,
             samplesCopied += samplesToCopy;
       }
    }
-   if( pNumCopied )
-      *pNumCopied = samplesCopied;
+   if( pNumWithinClips )
+      *pNumWithinClips = samplesCopied;
    return result;
 }
 
@@ -2078,7 +1967,7 @@ void WaveTrack::Set(samplePtr buffer, sampleFormat format,
             // startDelta is zero
          }
          else {
-            // startDelta is nonnegative and less than than len
+            // startDelta is nonnegative and less than len
             // samplesToCopy is positive and not more than len
          }
 
@@ -2228,7 +2117,7 @@ Sequence* WaveTrack::GetSequenceAtX(int xcoord)
 
 WaveClip* WaveTrack::CreateClip()
 {
-   mClips.push_back(make_movable<WaveClip>(mDirManager, mFormat, mRate, GetWaveColorIndex()));
+   mClips.push_back(std::make_unique<WaveClip>(mDirManager, mFormat, mRate, GetWaveColorIndex()));
    return mClips.back().get();
 }
 
@@ -2388,7 +2277,7 @@ void WaveTrack::SplitAt(double t)
       if (c->WithinClip(t))
       {
          t = LongSamplesToTime(TimeToLongSamples(t)); // put t on a sample
-         auto newClip = make_movable<WaveClip>( *c, mDirManager, true );
+         auto newClip = std::make_unique<WaveClip>( *c, mDirManager, true );
          c->Clear(t, c->GetEndTime());
          newClip->Clear(c->GetStartTime(), t);
 
@@ -2474,7 +2363,7 @@ void WaveTrack::ExpandCutLine(double cutLinePosition, double* cutlineStart,
                               double* cutlineEnd)
 // STRONG-GUARANTEE
 {
-   bool editClipCanMove = gPrefs->GetEditClipsCanMove();
+   bool editClipCanMove = GetEditClipsCanMove();
 
    // Find clip which contains this cut line
    double start = 0, end = 0;
@@ -2495,7 +2384,7 @@ void WaveTrack::ExpandCutLine(double cutLinePosition, double* cutlineStart,
                 clip->GetEndTime() + end - start > clip2->GetStartTime())
                // STRONG-GUARANTEE in case of this path
                throw SimpleMessageBoxException{
-                  _("There is not enough room available to expand the cut line")
+                  XO("There is not enough room available to expand the cut line")
                };
           }
       }
@@ -2597,7 +2486,7 @@ void WaveTrack::AddInvalidRegion(sampleCount startSample, sampleCount endSample)
       clip->AddInvalidRegion(startSample, endSample);
 }
 
-int WaveTrack::GetAutoSaveIdent()
+int WaveTrack::GetAutoSaveIdent() const
 {
    return mAutoSaveIdent;
 }
@@ -2805,4 +2694,30 @@ void WaveTrackCache::Free()
    mBuffers[1].Free();
    mOverlapBuffer.Free();
    mNValidBuffers = 0;
+}
+
+auto WaveTrack::AllClipsIterator::operator ++ () -> AllClipsIterator &
+{
+   // The unspecified sequence is a post-order, but there is no
+   // promise whether sister nodes are ordered in time.
+   if ( !mStack.empty() ) {
+      auto &pair =  mStack.back();
+      if ( ++pair.first == pair.second ) {
+         mStack.pop_back();
+      }
+      else
+         push( (*pair.first)->GetCutLines() );
+   }
+
+   return *this;
+}
+
+void WaveTrack::AllClipsIterator::push( WaveClipHolders &clips )
+{
+   auto pClips = &clips;
+   while (!pClips->empty()) {
+      auto first = pClips->begin();
+      mStack.push_back( Pair( first, pClips->end() ) );
+      pClips = &(*first)->GetCutLines();
+   }
 }

@@ -20,23 +20,28 @@ threshold of difference in two selected tracks
 
 #include "../Audacity.h"
 #include "CompareAudioCommand.h"
-#include "../MemoryX.h"
-#include "../Project.h"
+
+#include "LoadCommands.h"
+#include "../ViewInfo.h"
 #include "../WaveTrack.h"
-#include "Command.h"
 
 
 #include <float.h>
 #include <wx/intl.h>
 
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 #include "../widgets/valnum.h"
-#include "../SampleFormat.h"
 #include "CommandContext.h"
 
+const ComponentInterfaceSymbol CompareAudioCommand::Symbol
+{ XO("Compare Audio") };
+
+namespace{ BuiltinCommandsModule::Registration< CompareAudioCommand > reg; }
+
 extern void RegisterCompareAudio( Registrar & R){
-   R.AddCommand( make_movable<CompareAudioCommand>() );
+   R.AddCommand( std::make_unique<CompareAudioCommand>() );
 // std::unique_ptr<CommandOutputTargets> &&target
 //   return std::make_shared<CompareAudioCommand>(*this, std::move(target));
 
@@ -47,17 +52,13 @@ bool CompareAudioCommand::DefineParams( ShuttleParams & S ){
    return true;
 }
 
-bool CompareAudioCommand::Apply(){
-   return true;
-}
-
 void CompareAudioCommand::PopulateOrExchange(ShuttleGui & S)
 {
    S.AddSpace(0, 5);
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieTextBox(_("Threshold:"),errorThreshold);
+      S.TieTextBox(XO("Threshold:"),errorThreshold);
    }
    S.EndMultiColumn();
 }
@@ -66,8 +67,9 @@ void CompareAudioCommand::PopulateOrExchange(ShuttleGui & S)
 bool CompareAudioCommand::GetSelection(const CommandContext &context, AudacityProject &proj)
 {
    // Get the selected time interval
-   mT0 = proj.mViewInfo.selectedRegion.t0();
-   mT1 = proj.mViewInfo.selectedRegion.t1();
+   auto &selectedRegion = ViewInfo::Get( proj ).selectedRegion;
+   mT0 = selectedRegion.t0();
+   mT1 = selectedRegion.t1();
    if (mT0 >= mT1)
    {
       context.Error(wxT("There is no selection!"));
@@ -76,20 +78,20 @@ bool CompareAudioCommand::GetSelection(const CommandContext &context, AudacityPr
 
    // Get the selected tracks and check that there are at least two to
    // compare
-   SelectedTrackListOfKindIterator iter(Track::Wave, proj.GetTracks());
-   mTrack0 = (WaveTrack*)(iter.First());
+   auto trackRange = TrackList::Get( proj ).Selected< const WaveTrack >();
+   mTrack0 = *trackRange.first;
    if (mTrack0 == NULL)
    {
       context.Error(wxT("No tracks selected! Select two tracks to compare."));
       return false;
    }
-   mTrack1 = (WaveTrack*)(iter.Next());
+   mTrack1 = * ++ trackRange.first;
    if (mTrack1 == NULL)
    {
       context.Error(wxT("Only one track selected! Select two tracks to compare."));
       return false;
    }
-   if (iter.Next() != NULL)
+   if ( * ++ trackRange.first )
    {
       context.Status(wxT("More than two tracks selected - only the first two will be compared."));
    }
@@ -108,7 +110,7 @@ inline int min(int a, int b)
 
 bool CompareAudioCommand::Apply(const CommandContext & context)
 {
-   if (!GetSelection(context, *context.GetProject()))
+   if (!GetSelection(context, context.project))
    {
       return false;
    }
@@ -161,3 +163,4 @@ bool CompareAudioCommand::Apply(const CommandContext & context)
    context.Status(wxString::Format(wxT("Finished comparison: %li samples (%.3f seconds) exceeded the error threshold of %f."), errorCount, errorSeconds, errorThreshold));
    return true;
 }
+

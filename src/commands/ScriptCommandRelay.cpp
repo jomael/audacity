@@ -20,99 +20,86 @@ code out of ModuleManager.
 *//*******************************************************************/
 
 #include "ScriptCommandRelay.h"
+
 #include "CommandTargets.h"
 #include "CommandBuilder.h"
 #include "AppCommandEvent.h"
-#include "ResponseQueue.h"
 #include "../Project.h"
-#include "../AudacityApp.h"
+#include <wx/app.h>
 #include <wx/string.h>
+#include <thread>
 
-// Declare static class members
-CommandHandler *ScriptCommandRelay::sCmdHandler;
-tpRegScriptServerFunc ScriptCommandRelay::sScriptFn;
-ResponseQueue ScriptCommandRelay::sResponseQueue;
-
-void ScriptCommandRelay::SetRegScriptServerFunc(tpRegScriptServerFunc scriptFn)
-{
-   sScriptFn = scriptFn;
-}
-
-void ScriptCommandRelay::SetCommandHandler(CommandHandler &ch)
-{
-   sCmdHandler = &ch;
-}
-
-/// Calls the script function, passing it the function for obeying commands
-void ScriptCommandRelay::Run()
-{
-   wxASSERT( sScriptFn != NULL );
-   while( true )
-      sScriptFn(&ExecCommand);
-}
-
-/// Send a command to a project, to be applied in that context.
-void ScriptCommandRelay::PostCommand(AudacityProject *project, const OldStyleCommandPointer &cmd)
-{
-   wxASSERT(project != NULL);
-   wxASSERT(cmd != NULL);
-   AppCommandEvent ev;
-   ev.SetCommand(cmd);
-   project->GetEventHandler()->AddPendingEvent(ev);
-}
-
-/// This is the function which actually obeys one command.  Rather than applying
-/// the command directly, an event containing a reference to the command is sent
-/// to the main (GUI) thread. This is because having more than one thread access
-/// the GUI at a time causes problems with wxwidgets.
-int ExecCommand(wxString *pIn, wxString *pOut)
+/// This is the function which actually obeys one command.
+static int ExecCommand(wxString *pIn, wxString *pOut, bool fromMain)
 {
    {
-      CommandBuilder builder(*pIn);
+      CommandBuilder builder(::GetActiveProject(), *pIn);
       if (builder.WasValid())
       {
-         AudacityProject *project = GetActiveProject();
          OldStyleCommandPointer cmd = builder.GetCommand();
-         ScriptCommandRelay::PostCommand(project, cmd);
 
-         *pOut = wxEmptyString;
-      }
-      else
-      {
-         *pOut = wxT("Syntax error!\n");
-         *pOut += builder.GetErrorMessage() + wxT("\n");
-      }
-   }
+         AppCommandEvent ev;
+         ev.SetCommand(cmd);
 
-   // Wait until all responses from the command have been received.
-   // The last response is signalled by an empty line.
-   wxString msg = ScriptCommandRelay::ReceiveResponse().GetMessage();
-   while (msg != wxT("\n"))
-   {
-      //wxLogDebug( "Msg: %s", msg );
-      *pOut += msg + wxT("\n");
-      msg = ScriptCommandRelay::ReceiveResponse().GetMessage();
+         if (fromMain)
+         {
+            // Use SafelyProcessEvent, which stops exceptions, because this is
+            // expected to be reached from within the XLisp runtime
+            wxTheApp->SafelyProcessEvent(ev);
+         }
+         else
+         {
+            // Send the event to the main thread
+            wxTheApp->AddPendingEvent(ev);
+         }
+      }
+
+      // Wait for and retrieve the response
+      *pOut = builder.GetResponse();
    }
 
    return 0;
 }
 
-/// Adds a response to the queue to be sent back to the script
-void ScriptCommandRelay::SendResponse(const wxString &response)
+/// Executes a command in the worker (script) thread
+static int ExecFromWorker(wxString *pIn, wxString *pOut)
 {
-   sResponseQueue.AddResponse(response);
+   return ExecCommand(pIn, pOut, false);
 }
 
-/// Gets a response from the queue (may block)
-Response ScriptCommandRelay::ReceiveResponse()
+/// Executes a command on the main (GUI) thread.
+static int ExecFromMain(wxString *pIn, wxString *pOut)
 {
-   return ScriptCommandRelay::sResponseQueue.WaitAndGetResponse();
+   return ExecCommand(pIn, pOut, true);
 }
 
-/// Get a pointer to a message target which allows commands to send responses
-/// back to a script.
-std::shared_ptr<ResponseQueueTarget> ScriptCommandRelay::GetResponseTarget()
+/// Starts the script server
+void ScriptCommandRelay::StartScriptServer(tpRegScriptServerFunc scriptFn)
 {
-   // This should be deleted by a Command destructor
-   return std::make_shared<ResponseQueueTarget>(sResponseQueue);
+   wxASSERT(scriptFn != NULL);
+
+   auto server = [](tpRegScriptServerFunc function)
+   {
+      while (true)
+      {
+         function(ExecFromWorker);
+      }
+   };
+
+   std::thread(server, scriptFn).detach();
+}
+
+// The void * return is actually a Lisp LVAL and will be cast to such as needed.
+extern void * ExecForLisp( char * pIn );
+extern void * nyq_make_opaque_string( int size, unsigned char *src );
+extern void * nyq_reformat_aud_do_response(const wxString & Str);
+
+void * ExecForLisp( char * pIn )
+{
+   wxString Str1(pIn);
+   wxString Str2;
+
+   ExecFromMain(&Str1, &Str2);
+
+   return nyq_reformat_aud_do_response(Str2);
 }

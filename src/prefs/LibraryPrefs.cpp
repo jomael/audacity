@@ -16,21 +16,20 @@ MP3 and FFmpeg encoding libraries.
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
-
-#include <wx/defs.h>
-#include <wx/button.h>
-
-#include "../FFmpeg.h"
-#include "../ShuttleGui.h"
-#include "../export/ExportMP3.h"
-#include "../widgets/LinkingHtmlWindow.h"
-#include "../widgets/HelpSystem.h"
-#include "../widgets/ErrorDialog.h"
-
+#include "../Audacity.h" // for USE_* macros
 #include "LibraryPrefs.h"
 
 #include "../Experimental.h"
+
+#include <wx/defs.h>
+#include <wx/button.h>
+#include <wx/stattext.h>
+
+#include "../FFmpeg.h"
+#include "../export/ExportMP3.h"
+#include "../widgets/HelpSystem.h"
+#include "../widgets/AudacityMessageBox.h"
+
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -48,13 +47,28 @@ END_EVENT_TABLE()
 
 LibraryPrefs::LibraryPrefs(wxWindow * parent, wxWindowID winid)
 /* i18-hint: refers to optional plug-in software libraries */
-:   PrefsPanel(parent, winid, _("Libraries"))
+:   PrefsPanel(parent, winid, XO("Libraries"))
 {
    Populate();
 }
 
 LibraryPrefs::~LibraryPrefs()
 {
+}
+
+ComponentInterfaceSymbol LibraryPrefs::GetSymbol()
+{
+   return LIBRARY_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString LibraryPrefs::GetDescription()
+{
+   return XO("Preferences for Library");
+}
+
+wxString LibraryPrefs::HelpPageName()
+{
+   return "Libraries_Preferences";
 }
 
 /// Creates the dialog and its contents.
@@ -83,83 +97,83 @@ void LibraryPrefs::PopulateOrExchange(ShuttleGui & S)
    S.SetBorder(2);
    S.StartScroller();
 
-   S.StartStatic(_("MP3 Export Library"));
+   S.StartStatic(XO("LAME MP3 Export Library"));
    {
       S.StartTwoColumn();
       {
-         S.AddVariableText(_("MP3 Library Version:"),
-                           true,
-                           wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
-         mMP3Version = S.AddVariableText(wxT("9.99"),
-                                         true,
-                                         wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
-         S.AddVariableText(_("MP3 Library:"),
-                           true,
-                           wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
-         wxButton *locate_button = S.Id(ID_MP3_FIND_BUTTON).AddButton(_("&Locate..."),
-                                            wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
-         S.AddVariableText(_("LAME MP3 Library:"),
-                           true,
-                           wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
-         wxButton *download_button = S.Id(ID_MP3_DOWN_BUTTON).AddButton(_("&Download"),
-                                            wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
+         S.AddVariableText(XO("MP3 Library Version:"),
+            true, wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
+         // Change this text later:
+         mMP3Version = S.AddVariableText(Verbatim("9.99"),
+            true, wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
+// Old buttons, not needed now that the lib is built-in.
+#ifndef MP3_EXPORT_BUILT_IN
+
+         S.AddVariableText(XO("LAME MP3 Library:"),
+            true, wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
+         S.Id(ID_MP3_FIND_BUTTON)
 #ifdef DISABLE_DYNAMIC_LOADING_LAME
-         locate_button->Enable(FALSE);
-         download_button->Enable(FALSE);
-#else
-        (void)locate_button;
-        (void)download_button;
-#endif // DISABLE_DYNAMIC_LOADING_LAME
+             .Disable()
+#endif
+            .AddButton(XO("&Locate..."),
+                       wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
+         S.AddVariableText(XO("LAME MP3 Library:"),
+            true, wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
+         S.Id(ID_MP3_DOWN_BUTTON)
+#ifdef DISABLE_DYNAMIC_LOADING_LAME
+             .Disable()
+#endif
+            .AddButton(XO("&Download"),
+                       wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
+
+#endif
       }
       S.EndTwoColumn();
    }
    S.EndStatic();
 
-   S.StartStatic(_("FFmpeg Import/Export Library"));
+   S.StartStatic(XO("FFmpeg Import/Export Library"));
    {
       S.StartTwoColumn();
       {
-         S.AddVariableText(_("FFmpeg Library Version:"),
-                           true,
-                           wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
+         S.AddVariableText(XO("FFmpeg Library Version:"),
+            true, wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
 #if defined(USE_FFMPEG)
-         mFFmpegVersion = S.AddVariableText(_("No compatible FFmpeg library was found"),
-                                            true,
-                                            wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
+         mFFmpegVersion = S.AddVariableText(
+            XO("No compatible FFmpeg library was found"),
+            true, wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
 #else
-         mFFmpegVersion = S.AddVariableText(wxT("FFmpeg support is not compiled in"),
-                                            true,
-                                            wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
+         mFFmpegVersion = S.AddVariableText(
+            XO("FFmpeg support is not compiled in"),
+            true, wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
 #endif
-         S.AddVariableText(_("FFmpeg Library:"),
-                           true,
-                           wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
+         S.AddVariableText(XO("FFmpeg Library:"),
+            true, wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
          S.Id(ID_FFMPEG_FIND_BUTTON);
-         wxButton *bfnd = S.AddButton(_("Loca&te..."),
-                                      wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
-         S.AddVariableText(_("FFmpeg Library:"),
-                           true,
-                           wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
-         S.Id(ID_FFMPEG_DOWN_BUTTON);
-         wxButton *bdwn = S.AddButton(_("Dow&nload"),
-                                      wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
+         S
 #if !defined(USE_FFMPEG) || defined(DISABLE_DYNAMIC_LOADING_FFMPEG)
-         bdwn->Enable(FALSE);
-         bfnd->Enable(FALSE);
-#else
-         // fix compilation warnings about unused variables
-         wxUnusedVar(bfnd);
-         wxUnusedVar(bdwn);
+            .Disable()
 #endif
+            .AddButton(XO("Loca&te..."),
+                       wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
+         S.AddVariableText(XO("FFmpeg Library:"),
+            true, wxALL | wxALIGN_RIGHT | wxALIGN_CENTRE_VERTICAL);
+         S.Id(ID_FFMPEG_DOWN_BUTTON);
+         S
+#if !defined(USE_FFMPEG) || defined(DISABLE_DYNAMIC_LOADING_FFMPEG)
+            .Disable()
+#endif
+            .AddButton(XO("Dow&nload"),
+                       wxALL | wxALIGN_LEFT | wxALIGN_CENTRE_VERTICAL);
       }
       S.EndTwoColumn();
 #ifdef EXPERIMENTAL_OD_FFMPEG
-      wxCheckBox* checkbox = S.TieCheckBox(_("Allow &background on-demand loading"),
-                    wxT("/Library/FFmpegOnDemand"),
-                    false);
+      S
 #if !defined(USE_FFMPEG)
-      if( checkbox ) checkbox->Enable(FALSE);
+         .Disable()
 #endif
+         .TieCheckBox(XO("Allow &background on-demand loading"),
+                    {wxT("/Library/FFmpegOnDemand"), false});
 #endif
    }
    S.EndStatic();
@@ -200,7 +214,7 @@ void LibraryPrefs::OnFFmpegFindButton(wxCommandEvent & WXUNUSED(event))
 #ifdef USE_FFMPEG
    FFmpegLibs* FFmpegLibsPtr = PickFFmpegLibs();
    bool showerrs =
-#if defined(__WXDEBUG__)
+#if defined(_DEBUG)
       true;
 #else
       false;
@@ -212,9 +226,11 @@ void LibraryPrefs::OnFFmpegFindButton(wxCommandEvent & WXUNUSED(event))
 
    // Libs are fine, don't show "locate" dialog unless user really wants it
    if (!locate) {
-      int response = AudacityMessageBox(_("Audacity has automatically detected valid FFmpeg libraries.\nDo you still want to locate them manually?"),
-                                  wxT("Success"),
-                                  wxCENTRE | wxYES_NO | wxNO_DEFAULT |wxICON_QUESTION);
+      int response = AudacityMessageBox(
+         XO(
+"Audacity has automatically detected valid FFmpeg libraries.\nDo you still want to locate them manually?"),
+         XO("Success"),
+         wxCENTRE | wxYES_NO | wxNO_DEFAULT |wxICON_QUESTION);
       if (response == wxYES) {
         locate = true;
       }
@@ -245,13 +261,18 @@ bool LibraryPrefs::Commit()
    return true;
 }
 
-wxString LibraryPrefs::HelpPageName()
-{
-   return "Libraries_Preferences";
+#if !defined(DISABLE_DYNAMIC_LOADING_FFMPEG) || !defined(DISABLE_DYNAMIC_LOADING_LAME)
+namespace{
+PrefsPanel::Registration sAttachment{ "Library",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew LibraryPrefs(parent, winid);
+   },
+   false,
+   // Register with an explicit ordering hint because this one is
+   // only conditionally compiled
+   { "", { Registry::OrderingHint::Before, "Directories" } }
+};
 }
-
-PrefsPanel *LibraryPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew LibraryPrefs(parent, winid);
-}
+#endif

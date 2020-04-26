@@ -19,24 +19,26 @@
 #include "Command.h"
 #include "CommandType.h"
 
-#define SET_LABEL_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Set Label") }
-
 class SetLabelCommand : public AudacityCommand
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    SetLabelCommand();
-   // CommandDefinitionInterface overrides
-   IdentInterfaceSymbol GetSymbol() override {return SET_LABEL_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets various values for a label.");};
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Sets various values for a label.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Tools#set_label");};
+   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#set_label");};
 
    bool Apply(const CommandContext & context) override;
 
 public:
+   // zero-based index of the desired label, within the concatenation of the
+   // arrays of labels of all label tracks
    int mLabelIndex;
    wxString mText;
    double mT0;

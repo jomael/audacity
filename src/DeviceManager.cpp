@@ -6,6 +6,14 @@
 
 ******************************************************************/
 
+#include "Audacity.h" // for USE_* macros
+#include "DeviceManager.h"
+
+// For compilers that support precompilation, includes "wx/wx.h".
+#include <wx/wxprec.h>
+
+#include "Experimental.h"
+
 #include "portaudio.h"
 #ifdef __WXMSW__
 #include "pa_win_wasapi.h"
@@ -14,10 +22,6 @@
 #ifdef USE_PORTMIXER
 #include "portmixer.h"
 #endif
-
-#include "Audacity.h"
-// For compilers that support precompilation, includes "wx/wx.h".
-#include <wx/wxprec.h>
 
 #ifndef WX_PRECOMP
 #include <wx/choice.h>
@@ -31,13 +35,11 @@
 
 #include "Project.h"
 
-#include "AudioIO.h"
+#include "AudioIOBase.h"
 
-#include "DeviceChange.h"
-#include "DeviceManager.h"
-#include "toolbars/DeviceToolBar.h"
+#include "DeviceChange.h" // for HAVE_DEVICE_CHANGE
 
-#include "Experimental.h"
+wxDEFINE_EVENT(EVT_RESCANNED_DEVICES, wxCommandEvent);
 
 DeviceManager DeviceManager::dm;
 
@@ -211,8 +213,8 @@ static void AddSources(int deviceIndex, int rate, std::vector<DeviceSourceMap> *
    // If the device is for input, open a stream so we can use portmixer to query
    // the number of inputs.  We skip this for outputs because there are no 'sources'
    // and some platforms (e.g. XP) have the same device for input and output, (while
-   // Vista/Win7 seperate these into two devices with the same names (but different
-   // portaudio indecies)
+   // Vista/Win7 separate these into two devices with the same names (but different
+   // portaudio indices)
    // Also, for mapper devices we don't want to keep any sources, so check for it here
    if (isInput && !IsInputDeviceAMapperDevice(info)) {
       if (info)
@@ -258,6 +260,7 @@ void DeviceManager::Rescan()
    if (m_inited) {
       // check to see if there is a stream open - can happen if monitoring,
       // but otherwise Rescan() should not be available to the user.
+      auto gAudioIO = AudioIOBase::Get();
       if (gAudioIO) {
          if (gAudioIO->IsMonitoring())
          {
@@ -276,7 +279,7 @@ void DeviceManager::Rescan()
    // FIXME: TRAP_ERR PaErrorCode not handled in ReScan()
    int nDevices = Pa_GetDeviceCount();
 
-   //The heirarchy for devices is Host/device/source.
+   //The hierarchy for devices is Host/device/source.
    //Some newer systems aggregate this.
    //So we need to call port mixer for every device to get the sources
    for (int i = 0; i < nDevices; i++) {
@@ -297,16 +300,22 @@ void DeviceManager::Rescan()
    }
 
    // If this was not an initial scan update each device toolbar.
-   // Hosts may have disappeared or appeared so a complete repopulate is needed.
-   if (m_inited) {
-      DeviceToolBar *dt;
-      for (size_t i = 0; i < gAudacityProjects.size(); i++) {
-         dt = gAudacityProjects[i]->GetDeviceToolBar();
-         dt->RefillCombos();
-      }
+   if ( m_inited ) {
+      wxCommandEvent e{ EVT_RESCANNED_DEVICES };
+      wxTheApp->ProcessEvent( e );
    }
+
    m_inited = true;
+   mRescanTime = std::chrono::steady_clock::now();
 }
+
+
+float DeviceManager::GetTimeSinceRescan() {
+   auto now = std::chrono::steady_clock::now();
+   auto dur = std::chrono::duration_cast<std::chrono::duration<float>>(now - mRescanTime);
+   return dur.count();
+}
+
 
 //private constructor - Singleton.
 DeviceManager::DeviceManager()
@@ -317,6 +326,7 @@ DeviceManager::DeviceManager()
 #endif
 {
    m_inited = false;
+   mRescanTime = std::chrono::steady_clock::now();
 }
 
 DeviceManager::~DeviceManager()

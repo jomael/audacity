@@ -18,31 +18,19 @@ It is also a place to document colour usage policy in Audacity
 *//********************************************************************/
 
 #include "Audacity.h"
+#include "AColor.h"
+
+#include "Experimental.h"
+
 #include <wx/window.h>
 #include <wx/colour.h>
 #include <wx/dc.h>
 #include <wx/dcmemory.h>
+#include <wx/graphics.h>
 #include <wx/settings.h>
 #include <wx/utils.h>
 
-#include "AColor.h"
-#include "Theme.h"
-#include "Experimental.h"
 #include "AllThemeResources.h"
-
-void DCUnchanger::operator () (wxDC *pDC) const
-{
-   if (pDC) {
-      pDC->SetPen(pen);
-      pDC->SetBrush(brush);
-      pDC->SetLogicalFunction(wxRasterOperationMode(logicalOperation));
-   }
-}
-
-ADCChanger::ADCChanger(wxDC *pDC)
-   : Base{ pDC, ::DCUnchanger{ pDC->GetBrush(), pDC->GetPen(),
-      long(pDC->GetLogicalFunction()) } }
-{}
 
 bool AColor::inited = false;
 wxBrush AColor::lightBrush[2];
@@ -117,51 +105,51 @@ void AColor::Arrow(wxDC & dc, wxCoord x, wxCoord y, int width, bool down)
 }
 
 //
-// Draw a line while accounting for differences in wxWidgets versions
+// Draw a line, inclusive of endpoints,
+// compensating for differences in wxWidgets versions across platforms
 //
 void AColor::Line(wxDC & dc, wxCoord x1, wxCoord y1, wxCoord x2, wxCoord y2)
 {
-   // As of 2.8.9 (possibly earlier), wxDC::DrawLine() on the Mac draws the
-   // last point since it is now based on the NEW wxGraphicsContext system.
-   // Make the other platforms do the same thing since the other platforms
-   // "may" follow they get wxGraphicsContext going.
+   const wxPoint points[] { { x1, y1 }, { x2, y2 } };
+   Lines( dc, 2, points );
+}
+
+// Draw lines, INCLUSIVE of all endpoints
+void AColor::Lines(wxDC &dc, size_t nPoints, const wxPoint points[])
+{
+   if ( nPoints <= 1 ) {
+      if (nPoints == 1)
+         dc.DrawPoint( points[0] );
+      return;
+   }
+
+   for (size_t ii = 0; ii < nPoints - 1; ++ii) {
+      const auto &p1 = points[ii];
+      const auto &p2 = points[ii + 1];
+
+      // As of 2.8.9 (possibly earlier), wxDC::DrawLine() on the Mac draws the
+      // last point since it is now based on the NEW wxGraphicsContext system.
+      // Make the other platforms do the same thing since the other platforms
+      // "may" follow they get wxGraphicsContext going.
+
+      // PRL:  as of 3.1.1, I still observe that on Mac, the last point is
+      // included, contrary to what documentation says.  Also that on Windows,
+      // sometimes it is the first point that is excluded.
+
 #if defined(__WXMAC__) || defined(__WXGTK3__)
-   dc.DrawLine(x1, y1, x2, y2);
+      dc.DrawLine(p1, p2);
 #else
-   bool point = false;
-
-   if (x1 == x2) {
-      if (y1 < y2) {
-         y2++;
+      dc.DrawPoint(p1);
+      if ( p1 != p2 ) {
+         dc.DrawLine(p1, p2);
       }
-      else if (y2 < y1) {
-         y1++;
-      }
-      else {
-         point = true;
-      }
-   }
-   else if (y1 == y2) {
-      if (x1 < x2) {
-         x2++;
-      }
-      else if (x2 < x1) {
-         x1++;
-      }
-      else {
-         point = true;
-      }
-   }
-   else {
-      dc.DrawPoint(x2, y2);
+#endif
    }
 
-   if (point) {
-      dc.DrawPoint(x2, y2);
-   }
-   else {
-      dc.DrawLine(x1, y1, x2, y2);
-   }
+#if defined(__WXMAC__) || defined(__WXGTK3__)
+      ;
+#else
+      dc.DrawPoint( points[ nPoints - 1 ] );
 #endif
 }
 
@@ -244,10 +232,10 @@ void AColor::Bevel2
    int h = wxMin( r.height, Bmp.GetHeight() );
 
 
-   dc.Blit( r.x,r.y,r.width/2, h, &memDC, 0, 0 );
+   dc.Blit( r.x,r.y,r.width/2, h, &memDC, 0, 0, wxCOPY, true );
    int r2 = r.width - r.width/2;
    dc.Blit( r.x+r.width/2,r.y,r2, h, &memDC, 
-      Bmp.GetWidth() - r2, 0 );
+      Bmp.GetWidth() - r2, 0, wxCOPY, true );
 }
 
 wxColour AColor::Blend( const wxColour & c1, const wxColour & c2 )
@@ -264,6 +252,9 @@ void AColor::BevelTrackInfo(wxDC & dc, bool up, const wxRect & r, bool highlight
 #ifndef EXPERIMENTAL_THEMING
    Bevel( dc, up, r );
 #else
+   // Note that the actually drawn rectangle extends one pixel right of and
+   // below the given
+
    wxColour col;
    col = Blend( theTheme.Colour( clrTrackInfo ), up ? wxColour( 255,255,255):wxColour(0,0,0));
 
@@ -279,14 +270,16 @@ void AColor::BevelTrackInfo(wxDC & dc, bool up, const wxRect & r, bool highlight
    dc.SetPen( highlight ? uglyPen : pen );
 
    dc.DrawLine(r.x + r.width, r.y, r.x + r.width, r.y + r.height);
-   dc.DrawLine(r.x, r.y + r.height, r.x + r.width + 1, r.y + r.height);
+   dc.DrawLine(r.x, r.y + r.height, r.x + r.width, r.y + r.height);
 #endif
 }
 
 // Set colour of and select brush and pen.
 // Use -1 to omit brush or pen.
 // If pen omitted, then the same colour as the brush will be used.
-void AColor::UseThemeColour( wxDC * dc, int iBrush, int iPen )
+// alpha for the brush is normally 255, but if set will make a difference 
+// on mac (only) currently.
+void AColor::UseThemeColour( wxDC * dc, int iBrush, int iPen, int alpha )
 {
    if (!inited)
       Init();
@@ -296,6 +289,7 @@ void AColor::UseThemeColour( wxDC * dc, int iBrush, int iPen )
    wxColour col = wxColour(0,0,0);
    if( iBrush !=-1 ){
       col = theTheme.Colour( iBrush );
+      col.Set( col.Red(), col.Green(), col.Blue(), alpha);
       spareBrush.SetColour( col );
       dc->SetBrush( spareBrush );
    }
@@ -304,6 +298,27 @@ void AColor::UseThemeColour( wxDC * dc, int iBrush, int iPen )
    sparePen.SetColour( col );
    dc->SetPen( sparePen );
 }
+
+void AColor::UseThemeColour( wxGraphicsContext * gc, int iBrush, int iPen, int alpha )
+{
+   if (!inited)
+      Init();
+   // do nothing if no colours set.
+   if( (iBrush == -1) && ( iPen ==-1))
+      return;
+   wxColour col = wxColour(0,0,0);
+   if( iBrush !=-1 ){
+      col = theTheme.Colour( iBrush );
+      col.Set( col.Red(), col.Green(), col.Blue(), alpha);
+      spareBrush.SetColour( col );
+      gc->SetBrush( spareBrush );
+   }
+   if( iPen != -1)
+      col = theTheme.Colour( iPen );
+   sparePen.SetColour( col );
+   gc->SetPen( sparePen );
+}
+
 
 void AColor::Light(wxDC * dc, bool selected, bool highlight)
 {
@@ -571,12 +586,12 @@ void AColor::MIDIChannel(wxDC * dc, int channel /* 1 - 16 */ )
       const int *colors = AColor_midicolors[channel - 1];
 
       dc->SetPen(wxPen(wxColour(colors[0],
-                                colors[1], colors[2]), 1, wxSOLID));
+                                colors[1], colors[2]), 1, wxPENSTYLE_SOLID));
       dc->SetBrush(wxBrush(wxColour(colors[0],
-                                    colors[1], colors[2]), wxSOLID));
+                                    colors[1], colors[2]), wxBRUSHSTYLE_SOLID));
    } else {
-      dc->SetPen(wxPen(wxColour(153, 153, 153), 1, wxSOLID));
-      dc->SetBrush(wxBrush(wxColour(153, 153, 153), wxSOLID));
+      dc->SetPen(wxPen(wxColour(153, 153, 153), 1, wxPENSTYLE_SOLID));
+      dc->SetBrush(wxBrush(wxColour(153, 153, 153), wxBRUSHSTYLE_SOLID));
    }
 
 }
@@ -588,13 +603,13 @@ void AColor::LightMIDIChannel(wxDC * dc, int channel /* 1 - 16 */ )
 
       dc->SetPen(wxPen(wxColour(127 + colors[0] / 2,
                                 127 + colors[1] / 2,
-                                127 + colors[2] / 2), 1, wxSOLID));
+                                127 + colors[2] / 2), 1, wxPENSTYLE_SOLID));
       dc->SetBrush(wxBrush(wxColour(127 + colors[0] / 2,
                                     127 + colors[1] / 2,
-                                    127 + colors[2] / 2), wxSOLID));
+                                    127 + colors[2] / 2), wxBRUSHSTYLE_SOLID));
    } else {
-      dc->SetPen(wxPen(wxColour(204, 204, 204), 1, wxSOLID));
-      dc->SetBrush(wxBrush(wxColour(204, 204, 204), wxSOLID));
+      dc->SetPen(wxPen(wxColour(204, 204, 204), 1, wxPENSTYLE_SOLID));
+      dc->SetBrush(wxBrush(wxColour(204, 204, 204), wxBRUSHSTYLE_SOLID));
    }
 
 }
@@ -606,13 +621,13 @@ void AColor::DarkMIDIChannel(wxDC * dc, int channel /* 1 - 16 */ )
 
       dc->SetPen(wxPen(wxColour(colors[0] / 2,
                                 colors[1] / 2,
-                                colors[2] / 2), 1, wxSOLID));
+                                colors[2] / 2), 1, wxPENSTYLE_SOLID));
       dc->SetBrush(wxBrush(wxColour(colors[0] / 2,
                                     colors[1] / 2,
-                                    colors[2] / 2), wxSOLID));
+                                    colors[2] / 2), wxBRUSHSTYLE_SOLID));
    } else {
-      dc->SetPen(wxPen(wxColour(102, 102, 102), 1, wxSOLID));
-      dc->SetBrush(wxBrush(wxColour(102, 102, 102), wxSOLID));
+      dc->SetPen(wxPen(wxColour(102, 102, 102), 1, wxPENSTYLE_SOLID));
+      dc->SetBrush(wxBrush(wxColour(102, 102, 102), wxBRUSHSTYLE_SOLID));
    }
 
 }

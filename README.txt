@@ -5,9 +5,10 @@ User support is provided on Audacity Forum:
 https://forum.audacityteam.org/ .
 
 We welcome feedback on Audacity, suggestions for new or improved features, 
-and bug reports. Please visit https://forum.audacityteam.org/viewforum.php?f=25 .
+and bug reports. Please visit 
+https://forum.audacityteam.org/viewforum.php?f=25 .
 
-Audacity is copyright (c) 1999-2018 by Audacity Team. This copyright 
+Audacity is copyright (c) 1999-2019 by Audacity Team. This copyright 
 notice applies to all documents in the Audacity source code archive, 
 except as otherwise noted (mostly in the lib-src subdirectories). 
 "Audacity" is a registered trademark of Dominic Mazzoni. 
@@ -16,9 +17,9 @@ The Audacity documentation is licensed under the Creative Commons
 Attribution 3.0 license: https://creativecommons.org/licenses/by/3.0/legalcode .
 
 Compilation instructions for Audacity are provided in the source code:
-* Windows: win\compile.txt
-* macOS: mac/Build.txt
-* GNU/Linux: INSTALL . 
+* Windows: win\build.txt
+* macOS: mac/build.txt
+* GNU/Linux: linux/build.txt 
 
 You can ask for help with compilation problems at:
 https://forum.audacityteam.org/viewforum.php?f=19 .
@@ -28,12 +29,12 @@ pull request on https://github.com/audacity/audacity/pulls . It's usually
 best to discuss functional code changes with us first on audacity-devel: 
 https://lists.sourceforge.net/lists/listinfo/audacity-devel . 
 
-Version 2.2.2
+Version 2.4.0
 
 Contents of this README:
 
 1.  Licensing
-2.  Changes since version 2.2.1
+2.  Changes since version 2.3.3
 3.  Known Issues at Release
 4.  Source Code, Libraries and Additional Copyright Information
 
@@ -61,79 +62,52 @@ to https://www.gnu.org/licenses/old-licenses/gpl-2.0.html or write to
   Boston, MA 02111-1307 USA
 
 
--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
 
-2. Changes since version 2.2.1: 
+2. Changes since version 2.3.3: 
 
 Improvements
 
-    * Dropout detection
-      Dropout detection is controlled from a setting in Recording Preferences 
-      called "Detect dropouts".
-      When this setting is "on" (default setting) Audacity will detect dropouts 
-      (brief gaps in the recording) and will insert zeroes into the recording 
-      to keep the other good parts synchronized. These silent spans will make 
-      the dropouts more obvious, but keep the duration of the recording correct.
-      When recording stops, a Warning message box alerts the user and a label track, 
-      called "Dropouts", is added showing the lost parts, labeled with consecutive numbers.
-    * Improved horizontal zooming
-      For this release we have improved the way zooming using your mouse wheel 
-      works and provided a new Zoom Toggle function. 
-    * Improved vertical zooming
-      We have added a context menu to the vertical scale to control vertical zooming
-      Previous vertical zooming methods (left-click in the vertical ruler, left-drag
-      in the vertical ruler) remain available by selecting "Advanced Vertical Zooming"
-      in Track Behaviors Preferences.
-    * "Extra" menu
-      The "Ext-Bar" and "Ext-Command" menus have been consolidated into the "Extra" menu.
-    * Theme tweaks
-      The appearance and/or contrast of a few icons has been improved.
-    * Easier access to changing key bindings for shortcuts
-      For menu commands that are enabled (not grayed-out) if you hold the Shift key 
-      and click on the sub-menu item, instead of executing the command the Keyboard 
-      Preferences pop open at the chosen command. You can then change that (or any 
-      other) shortcut binding. 
-    * Language selection in Preferences
-      Interface Preferences has been upgraded so when selecting languages the proper
-      spelling of these languages is shown with accented and special characters. 
+ * Audacity now runs on Mac Catalina.
+ * A new Time Toolbar showing current record/playback time has been
+   split from the Selection Toolbar.  It can be resized large.
+ * Presets for more effects can be imported and exported.
+ * A new Multi-View mode for tracks.  In this mode both 
+   spectrogram and waveform views are shown at the same time.
+ * Opus available as a new audio export format on Windows and Linux.
+ * Easier to convert labels between point labels and range labels.
+ * New Loudness Normalization effect.
+ * New RMS measurement analyzer.
+ * New Noise Gate effect.
+ * New Spectral Delete effect.
+
+See also: https://wiki.audacityteam.org/wiki/New_features_in_Audacity_2.4.0
+
 
 Bug Fixes
-   * Multiple use of "Save As" to the existing open project can result in data 
-     corruption/loss
-   * Crash undoing during record, using Discard button of History window
-   * Exporting audio in compressed formats to device with insufficient space produces
-     inconsistent/truncated results
-   * In Export Multiple, Cancel does not remove the file that is in progress when 
-     Cancel is chosen
-   * Unicode page encodings fixed ( ͡° ͜ʖ ͡°)
-   * Crash using SBSMS pitch change at low sample rate
-   * (Mac) Equalization: "Telephone" curve displays a flat line, no sound on Preview
-   * Toolbars: open undocked if previously not shown, unless Reset Toolbars first
-   * Analysis effects that create labels should give focus to label track
-   * Control value may be out of range when using FloatingPointValidator
-   * Analysis effects produce false indication that a label is open for editing
-   * Import Uncompressed File Dialog Incorrect Reference to Menu Item
-   * Wave Color not grayed out in TCP dropdown menu when in Spectrogram view
-   * Hover indication on note track channel toggle appears on all tracks (when 
-     they rerender)
-   * Installer has old logo for 2.2.1 and 2.2.0
-   * Un-muting with a single track unnecessarily activates the Solo button
-   * Applying chain to file should zoom-to-fit
-   
- See also: https://wiki.audacityteam.org/wiki/Release_Notes_2.2.2
- and: https://wiki.audacityteam.org/wiki/New_features_in_Audacity_2.2.2
+
+ Over 100 bugs in 2.3.3 fixed, including:
+
+ * 2237 - Equalization effects have no Import or Export for curves
+ * 2261 - Graphic EQ sliders have no frequency labels
+ * 2265 - Track heights are reset to default on project re-opening
+ * 2303 - Playback does not start at the saved cursor position on reopening a saved project.
+ * 2314 - Zoom in fail when playing
+
+
+See also: https://wiki.audacityteam.org/wiki/Release_Notes_2.4.0
+
 
 -------------------------------------------------------------------------------
 
-3. Known Issues in 2.2.2:
 
-For known issues at release of 2.2.2 please see:
-  https://wiki.audacityteam.org/wiki/Release_Notes_2.2.2/Issues 
+3. Some Known Issues in 2.4.0:
 
-Please also check:
-  https://wiki.audacityteam.org/wiki/Known_Issues
-for details of any issues that have been identified after release of
-this version.
+ *  208 - Some effects (including equalization effects) delete Envelope Control Points, or do not move them when timeline changes
+ * 2212 - Mac: Keyboard tabbing in Timer Record stuck in left hand panel.
+
+For best workarounds and other known issues in 2.4.0, please see:
+  https://wiki.audacityteam.org/wiki/Release_Notes_2.4.0/Issues 
 
 
 -------------------------------------------------------------------------------

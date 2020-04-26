@@ -18,12 +18,13 @@
 
 #include "../Project.h"
 #include "../Prefs.h"
+#include "../ViewInfo.h"
 #include "../WaveTrack.h"
+#include "../prefs/TracksBehaviorsPrefs.h"
 
 #include "TimeWarper.h"
 
-#include "../MemoryX.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
 bool Generator::Process()
 {
@@ -32,21 +33,18 @@ bool Generator::Process()
 
 
    // Set up mOutputTracks.
-   // This effect needs Track::All for sync-lock grouping.
-   this->CopyInputTracks(Track::All);
+   // This effect needs all for sync-lock grouping.
+   this->CopyInputTracks(true);
 
    // Iterate over the tracks
    bool bGoodResult = true;
    int ntrack = 0;
-   TrackListIterator iter(mOutputTracks.get());
-   Track* t = iter.First();
 
-   while (t != NULL)
-   {
-      if (t->GetKind() == Track::Wave && t->GetSelected()) {
-         WaveTrack* track = (WaveTrack*)t;
-
-         bool editClipCanMove = gPrefs->GetEditClipsCanMove();
+   mOutputTracks->Any().VisitWhile( bGoodResult,
+      [&](WaveTrack *track, const Track::Fallthrough &fallthrough) {
+         if (!track->GetSelected())
+            return fallthrough();
+         bool editClipCanMove = GetEditClipsCanMove();
 
          //if we can't move clips, and we're generating into an empty space,
          //make sure there's room.
@@ -55,21 +53,19 @@ bool Generator::Process()
              !track->IsEmpty(mT0, mT0+GetDuration()-(mT1-mT0)-1.0/track->GetRate()))
          {
             Effect::MessageBox(
-                  _("There is not enough room available to generate the audio"),
-                  wxICON_STOP,
-                  _("Error"));
+               XO("There is not enough room available to generate the audio"),
+               wxICON_STOP,
+               XO("Error") );
             Failure();
-            return false;
+            bGoodResult = false;
+            return;
          }
 
          if (GetDuration() > 0.0)
          {
-            AudacityProject *p = GetActiveProject();
+            auto pProject = FindProject();
             // Create a temporary track
-            WaveTrack::Holder tmp(
-               mFactory->NewWaveTrack(track->GetSampleFormat(),
-               track->GetRate())
-            );
+            auto tmp = track->EmptyCopy();
             BeforeTrack(*track);
             BeforeGenerate();
 
@@ -81,13 +77,16 @@ bool Generator::Process()
                tmp->Flush();
                StepTimeWarper warper{
                   mT0+GetDuration(), GetDuration()-(mT1-mT0) };
+               const auto &selectedRegion =
+                  ViewInfo::Get( *pProject ).selectedRegion;
                track->ClearAndPaste(
-                  p->GetSel0(), p->GetSel1(), &*tmp, true, false, &warper);
+                  selectedRegion.t0(), selectedRegion.t1(),
+                  &*tmp, true, false, &warper);
             }
 
             if (!bGoodResult) {
                Failure();
-               return false;
+               return;
             }
          }
          else
@@ -98,21 +97,23 @@ bool Generator::Process()
          }
 
          ntrack++;
+      },
+      [&](Track *t) {
+         if (t->IsSyncLockSelected()) {
+            t->SyncLockAdjust(mT1, mT0 + GetDuration());
+         }
       }
-      else if (t->IsSyncLockSelected()) {
-         t->SyncLockAdjust(mT1, mT0 + GetDuration());
-      }
-      // Move on to the next track
-      t = iter.Next();
+   );
+
+   if (bGoodResult) {
+      Success();
+
+      this->ReplaceProcessedTracks(bGoodResult);
+
+      mT1 = mT0 + GetDuration(); // Update selection.
    }
 
-   Success();
-
-   this->ReplaceProcessedTracks(bGoodResult);
-
-   mT1 = mT0 + GetDuration(); // Update selection.
-
-   return true;
+   return bGoodResult;
 }
 
 bool BlockGenerator::GenerateTrack(WaveTrack *tmp,

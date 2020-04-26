@@ -18,11 +18,10 @@ and libvorbis examples, Monty <monty@xiph.org>
 
 **********************************************************************/
 
-#include "../Audacity.h"
+#include "../Audacity.h" // for USE_* macros
 
 #ifdef USE_LIBFLAC
 
-#include "ExportFLAC.h"
 #include "Export.h"
 
 #include <wx/progdlg.h>
@@ -32,16 +31,17 @@ and libvorbis examples, Monty <monty@xiph.org>
 #include "FLAC++/encoder.h"
 
 #include "../float_cast.h"
-#include "../Project.h"
+#include "../ProjectSettings.h"
 #include "../Mix.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 
-#include "../Internat.h"
 #include "../Tags.h"
-
 #include "../Track.h"
-#include "../widgets/ErrorDialog.h"
+
+#include "../widgets/AudacityMessageBox.h"
+#include "../widgets/ProgressDialog.h"
+#include "../wxFileNameWrapper.h"
 
 //----------------------------------------------------------------------------
 // ExportFLACOptions Class
@@ -77,35 +77,58 @@ ExportFLACOptions::~ExportFLACOptions()
    TransferDataFromWindow();
 }
 
+ChoiceSetting FLACBitDepth{
+   wxT("/FileFormats/FLACBitDepth"),
+   {
+      ByColumns,
+      { XO("16 bit") , XO("24 bit") , },
+      { wxT("16") ,    wxT("24") , }
+   },
+   0 // "16",
+};
+
+ChoiceSetting FLACLevel{
+   wxT("/FileFormats/FLACLevel"),
+   {
+      ByColumns,
+      {
+         XO("0 (fastest)") ,
+         XO("1") ,
+         XO("2") ,
+         XO("3") ,
+         XO("4") ,
+         XO("5") ,
+         XO("6") ,
+         XO("7") ,
+         XO("8 (best)") ,
+      },
+      {
+         wxT("0") ,
+         wxT("1") ,
+         wxT("2") ,
+         wxT("3") ,
+         wxT("4") ,
+         wxT("5") ,
+         wxT("6") ,
+         wxT("7") ,
+         wxT("8") ,
+      }
+   },
+   5 //"5"
+};
+
 ///
 ///
 void ExportFLACOptions::PopulateOrExchange(ShuttleGui & S)
 {
-   wxArrayString flacLevelNames, flacLevelLabels;
-   flacLevelLabels.Add(wxT("0")); flacLevelNames.Add(_("0 (fastest)"));
-   flacLevelLabels.Add(wxT("1")); flacLevelNames.Add(_("1"));
-   flacLevelLabels.Add(wxT("2")); flacLevelNames.Add(_("2"));
-   flacLevelLabels.Add(wxT("3")); flacLevelNames.Add(_("3"));
-   flacLevelLabels.Add(wxT("4")); flacLevelNames.Add(_("4"));
-   flacLevelLabels.Add(wxT("5")); flacLevelNames.Add(_("5"));
-   flacLevelLabels.Add(wxT("6")); flacLevelNames.Add(_("6"));
-   flacLevelLabels.Add(wxT("7")); flacLevelNames.Add(_("7"));
-   flacLevelLabels.Add(wxT("8")); flacLevelNames.Add(_("8 (best)"));
-
-   wxArrayString flacBitDepthNames, flacBitDepthLabels;
-   flacBitDepthLabels.Add(wxT("16")); flacBitDepthNames.Add(_("16 bit"));
-   flacBitDepthLabels.Add(wxT("24")); flacBitDepthNames.Add(_("24 bit"));
-
    S.StartVerticalLay();
    {
       S.StartHorizontalLay(wxCENTER);
       {
          S.StartMultiColumn(2, wxCENTER);
          {
-            S.TieChoice(_("Level:"), wxT("/FileFormats/FLACLevel"),
-                        wxT("5"), flacLevelNames, flacLevelLabels);
-            S.TieChoice(_("Bit depth:"), wxT("/FileFormats/FLACBitDepth"),
-                        wxT("16"), flacBitDepthNames, flacBitDepthLabels);
+            S.TieChoice( XO("Level:"), FLACLevel);
+            S.TieChoice( XO("Bit depth:"), FLACBitDepth);
          }
          S.EndMultiColumn();
       }
@@ -189,11 +212,11 @@ public:
 
    // Required
 
-   wxWindow *OptionsCreate(wxWindow *parent, int format) override;
+   void OptionsCreate(ShuttleGui &S, int format) override;
    ProgressResult Export(AudacityProject *project,
                std::unique_ptr<ProgressDialog> &pDialog,
                unsigned channels,
-               const wxString &fName,
+               const wxFileNameWrapper &fName,
                bool selectedOnly,
                double t0,
                double t1,
@@ -219,13 +242,13 @@ ExportFLAC::ExportFLAC()
    AddExtension(wxT("flac"),0);
    SetMaxChannels(FLAC__MAX_CHANNELS,0);
    SetCanMetaData(true,0);
-   SetDescription(_("FLAC Files"),0);
+   SetDescription(XO("FLAC Files"),0);
 }
 
 ProgressResult ExportFLAC::Export(AudacityProject *project,
                         std::unique_ptr<ProgressDialog> &pDialog,
                         unsigned numChannels,
-                        const wxString &fName,
+                        const wxFileNameWrapper &fName,
                         bool selectionOnly,
                         double t0,
                         double t1,
@@ -233,17 +256,17 @@ ProgressResult ExportFLAC::Export(AudacityProject *project,
                         const Tags *metadata,
                         int WXUNUSED(subformat))
 {
-   double    rate    = project->GetRate();
-   const TrackList *tracks = project->GetTracks();
+   const auto &settings = ProjectSettings::Get( *project );
+   double    rate    = settings.GetRate();
+   const auto &tracks = TrackList::Get( *project );
 
    wxLogNull logNo;            // temporarily disable wxWidgets error messages
    auto updateResult = ProgressResult::Success;
 
-   int levelPref;
-   gPrefs->Read(wxT("/FileFormats/FLACLevel"), &levelPref, 5);
+   long levelPref;
+   FLACLevel.Read().ToLong( &levelPref );
 
-   wxString bitDepthPref =
-      gPrefs->Read(wxT("/FileFormats/FLACBitDepth"), wxT("16"));
+   auto bitDepthPref = FLACBitDepth.Read();
 
    FLAC::Encoder::File encoder;
 
@@ -258,7 +281,7 @@ ProgressResult ExportFLAC::Export(AudacityProject *project,
    // See note in GetMetadata() about a bug in libflac++ 1.1.2
    if (success && !GetMetadata(project, metadata)) {
       // TODO: more precise message
-      AudacityMessageBox(_("Unable to export"));
+      AudacityMessageBox( XO("Unable to export") );
       return ProgressResult::Cancelled;
    }
 
@@ -311,7 +334,7 @@ ProgressResult ExportFLAC::Export(AudacityProject *project,
 
    if (!success) {
       // TODO: more precise message
-      AudacityMessageBox(_("Unable to export"));
+      AudacityMessageBox( XO("Unable to export") );
       return ProgressResult::Cancelled;
    }
 
@@ -319,8 +342,9 @@ ProgressResult ExportFLAC::Export(AudacityProject *project,
    encoder.init();
 #else
    wxFFile f;     // will be closed when it goes out of scope
-   if (!f.Open(fName, wxT("w+b"))) {
-      AudacityMessageBox(wxString::Format(_("FLAC export couldn't open %s"), fName));
+   const auto path = fName.GetFullPath();
+   if (!f.Open(path, wxT("w+b"))) {
+      AudacityMessageBox( XO("FLAC export couldn't open %s").Format( path ) );
       return ProgressResult::Cancelled;
    }
 
@@ -329,7 +353,9 @@ ProgressResult ExportFLAC::Export(AudacityProject *project,
    // libflac can't (under Windows).
    int status = encoder.init(f.fp());
    if (status != FLAC__STREAM_ENCODER_INIT_STATUS_OK) {
-      AudacityMessageBox(wxString::Format(_("FLAC encoder failed to initialize\nStatus: %d"), status));
+      AudacityMessageBox(
+         XO("FLAC encoder failed to initialize\nStatus: %d")
+            .Format( status ) );
       return ProgressResult::Cancelled;
    }
 #endif
@@ -346,20 +372,17 @@ ProgressResult ExportFLAC::Export(AudacityProject *project,
       }
    } );
 
-   const WaveTrackConstArray waveTracks =
-      tracks->GetWaveTrackConstArray(selectionOnly, false);
-   auto mixer = CreateMixer(waveTracks,
-                            tracks->GetTimeTrack(),
+   auto mixer = CreateMixer(tracks, selectionOnly,
                             t0, t1,
                             numChannels, SAMPLES_PER_RUN, false,
                             rate, format, true, mixerSpec);
 
    ArraysOf<FLAC__int32> tmpsmplbuf{ numChannels, SAMPLES_PER_RUN, true };
 
-   InitProgress( pDialog, wxFileName(fName).GetName(),
+   InitProgress( pDialog, fName,
       selectionOnly
-         ? _("Exporting the selected audio as FLAC")
-         : _("Exporting the audio as FLAC") );
+         ? XO("Exporting the selected audio as FLAC")
+         : XO("Exporting the audio as FLAC") );
    auto &progress = *pDialog;
 
    while (updateResult == ProgressResult::Success) {
@@ -385,7 +408,7 @@ ProgressResult ExportFLAC::Export(AudacityProject *project,
                reinterpret_cast<FLAC__int32**>( tmpsmplbuf.get() ),
                samplesThisRun) ) {
             // TODO: more precise message
-            AudacityMessageBox(_("Unable to export"));
+            AudacityMessageBox( XO("Unable to export") );
             updateResult = ProgressResult::Cancelled;
             break;
          }
@@ -412,10 +435,9 @@ ProgressResult ExportFLAC::Export(AudacityProject *project,
    return updateResult;
 }
 
-wxWindow *ExportFLAC::OptionsCreate(wxWindow *parent, int format)
+void ExportFLAC::OptionsCreate(ShuttleGui &S, int format)
 {
-   wxASSERT(parent); // to justify safenew
-   return safenew ExportFLACOptions(parent, format);
+   S.AddWindow( safenew ExportFLACOptions{ S.GetParent(), format } );
 }
 
 // LL:  There's a bug in libflac++ 1.1.2 that prevents us from using
@@ -428,7 +450,7 @@ bool ExportFLAC::GetMetadata(AudacityProject *project, const Tags *tags)
 {
    // Retrieve tags if needed
    if (tags == NULL)
-      tags = project->GetTags();
+      tags = &Tags::Get( *project );
 
    mMetadata.reset(::FLAC__metadata_object_new(FLAC__METADATA_TYPE_VORBIS_COMMENT));
 
@@ -450,10 +472,9 @@ bool ExportFLAC::GetMetadata(AudacityProject *project, const Tags *tags)
    return true;
 }
 
-movable_ptr<ExportPlugin> New_ExportFLAC()
-{
-   return make_movable<ExportFLAC>();
-}
+static Exporter::RegisteredExportPlugin sRegisteredPlugin{ "FLAC",
+   []{ return std::make_unique< ExportFLAC >(); }
+};
 
 #endif // USE_LIBFLAC
 

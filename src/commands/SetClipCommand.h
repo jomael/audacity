@@ -16,24 +16,22 @@
 #ifndef __SET_CLIP_COMMAND__
 #define __SET_CLIP_COMMAND__
 
-#include "Command.h"
-#include "CommandType.h"
 #include "SetTrackInfoCommand.h"
-
-#define SET_CLIP_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Set Clip") }
 
 class SetClipCommand : public SetTrackBase
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    SetClipCommand();
-   // CommandDefinitionInterface overrides
-   IdentInterfaceSymbol GetSymbol() override {return SET_CLIP_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets various values for a clip.");};
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Sets various values for a clip.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Tools#set_clip");};
+   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#set_clip");};
    bool ApplyInner( const CommandContext & context, Track * t ) override;
 
 public:

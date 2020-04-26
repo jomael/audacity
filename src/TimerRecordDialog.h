@@ -16,19 +16,21 @@
 #ifndef __AUDACITY_TIMERRECORD_DIALOG__
 #define __AUDACITY_TIMERRECORD_DIALOG__
 
-#include <wx/dialog.h>
-#include <wx/textctrl.h>
-#include <wx/datectrl.h>
-#include <wx/calctrl.h>
-#include <wx/timer.h>
-#include <wx/checkbox.h>
+#include <wx/textctrl.h> // to inherit
+#include <wx/timer.h> // member variable
 #include "export/Export.h"
 
+class wxCheckBox;
+class wxChoice;
+class wxDateEvent;
+class wxDatePickerCtrl;
 class wxTimerEvent;
 
 class NumericTextCtrl;
 class ShuttleGui;
 class TimerRecordPathCtrl;
+
+class wxArrayStringEx;
 
 enum TimerRecordCompletedActions {
    TR_ACTION_NOTHING = 0x00000000,
@@ -36,17 +38,24 @@ enum TimerRecordCompletedActions {
    TR_ACTION_EXPORTED = 0x00000002
 };
 
+class AudacityProject;
+
 class TimerRecordPathCtrl final : public wxTextCtrl
 {
    // MY: Class that inherits from the wxTextCtrl class.
    // We override AcceptsFocusFromKeyboard in order to add
    // the text controls to the Tab Order.
 public:
-   TimerRecordPathCtrl(wxWindow * parent, wxWindowID id, const wxString &value
-      = wxEmptyString, const wxPoint &pos = wxDefaultPosition, const wxSize &
-      size = wxDefaultSize, long  style = 0, const wxValidator &  validator =
-      wxDefaultValidator, const wxString &  name = wxTextCtrlNameStr)
-      :wxTextCtrl(parent, id, value, pos, size, style, validator, name) {};
+   TimerRecordPathCtrl(wxWindow * parent, wxWindowID id,
+      const TranslatableString &value = {},
+      const wxPoint &pos = wxDefaultPosition,
+      const wxSize &size = wxDefaultSize,
+      long  style = 0,
+      const wxValidator &validator = wxDefaultValidator,
+      const wxString &name = wxTextCtrlNameStr)
+      :wxTextCtrl(parent, id, value.Translation(), pos, size, style, validator, name)
+   {
+   };
    ~TimerRecordPathCtrl() {};
 
    virtual bool AcceptsFocusFromKeyboard() const override {
@@ -57,7 +66,8 @@ public:
 class TimerRecordDialog final : public wxDialogWrapper
 {
 public:
-   TimerRecordDialog(wxWindow* parent, bool bAlreadySaved);
+   TimerRecordDialog(
+      wxWindow* parent, AudacityProject &project, bool bAlreadySaved);
    ~TimerRecordDialog();
 
    void OnTimer(wxTimerEvent& event);
@@ -76,7 +86,7 @@ private:
    void OnOK(wxCommandEvent& event);
    void OnHelpButtonClick(wxCommandEvent& event);
 
-   wxString GetDisplayDate(wxDateTime & dt);
+   TranslatableString GetDisplayDate(wxDateTime & dt);
    void PopulateOrExchange(ShuttleGui& S);
 
    bool TransferDataFromWindow() override;
@@ -99,12 +109,16 @@ private:
    bool RemoveAllAutoSaveFiles();
 
    // Add Path Controls to Form
-   TimerRecordPathCtrl *NewPathControl(wxWindow *wParent, const int iID, const wxString &sCaption, const wxString &sValue);
+   TimerRecordPathCtrl *NewPathControl(
+      wxWindow *wParent, const int iID,
+      const TranslatableString &sCaption, const TranslatableString &sValue);
 
    int ExecutePostRecordActions(bool bWasStopped);
    ProgressResult PreActionDelay(int iActionIndex, TimerRecordCompletedActions eCompletedActions);
 
 private:
+   AudacityProject &mProject;
+
    wxDateTime m_DateTime_Start;
    wxDateTime m_DateTime_End;
    wxTimeSpan m_TimeSpan_Duration;
@@ -143,10 +157,6 @@ private:
    int m_iAutoExportSubFormat;
    int m_iAutoExportFilterIndex;
    bool m_bProjectAlreadySaved;
-
-   // Variables for After Timer Recording Option
-   wxString m_sTimerAfterCompleteOption;
-   wxArrayString m_sTimerAfterCompleteOptionsArray;
 
    DECLARE_EVENT_TABLE()
 };

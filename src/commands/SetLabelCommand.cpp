@@ -18,13 +18,20 @@
 
 #include "../Audacity.h"
 #include "SetLabelCommand.h"
-#include "../Project.h"
-#include "../Track.h"
-#include "../TrackPanel.h"
+
+#include "LoadCommands.h"
+#include "../ViewInfo.h"
 #include "../WaveTrack.h"
 #include "../LabelTrack.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "CommandContext.h"
+#include "../tracks/labeltrack/ui/LabelTrackView.h"
+
+const ComponentInterfaceSymbol SetLabelCommand::Symbol
+{ XO("Set Label") };
+
+namespace{ BuiltinCommandsModule::Registration< SetLabelCommand > reg; }
 
 SetLabelCommand::SetLabelCommand()
 {
@@ -46,15 +53,15 @@ void SetLabelCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieNumericTextBox( _("Label Index"), mLabelIndex );
+      S.TieNumericTextBox( XO("Label Index"), mLabelIndex );
    }
    S.EndMultiColumn();
    S.StartMultiColumn(3, wxALIGN_CENTER);
    {
-      S.Optional( bHasText      ).TieTextBox(         _("Text:"),     mText );
-      S.Optional( bHasT0        ).TieNumericTextBox(  _("Start:"),    mT0 );
-      S.Optional( bHasT1        ).TieNumericTextBox(  _("End:"),      mT1 );
-      S.Optional( bHasSelected  ).TieCheckBox(        _("Selected:"), mbSelected );
+      S.Optional( bHasText      ).TieTextBox(         XO("Text:"),     mText );
+      S.Optional( bHasT0        ).TieNumericTextBox(  XO("Start:"),    mT0 );
+      S.Optional( bHasT1        ).TieNumericTextBox(  XO("End:"),      mT1 );
+      S.Optional( bHasSelected  ).TieCheckBox(        XO("Selected"),  mbSelected );
    }
    S.EndMultiColumn();
 }
@@ -65,58 +72,56 @@ bool SetLabelCommand::Apply(const CommandContext & context)
    // this code could be put in subroutines/reduced.
 
    //wxString mode = GetString(wxT("Type"));
-   AudacityProject * p = context.GetProject();
-   TrackList *tracks = context.GetProject()->GetTracks();
-   TrackListIterator iter(tracks);
-   Track *t = iter.First();
-   LabelStruct * pLabel = NULL;
-   int i=0;
-   int nn=0;
-
+   AudacityProject * p = &context.project;
+   auto &tracks = TrackList::Get( *p );
+   auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
+   const LabelStruct * pLabel = nullptr;
    LabelTrack *labelTrack = nullptr;
-   while (t && i<=mLabelIndex) {
-      if (t->GetKind() == Track::Label) {
-         labelTrack = static_cast<LabelTrack*>(t);
-         if( labelTrack )
-         {
-            for (nn = 0; 
-               (nn< (int)labelTrack->mLabels.size()) && i<=mLabelIndex; 
-               nn++) {
-               i++;
-               pLabel = &labelTrack->mLabels[nn];
-            }
+   auto ii = mLabelIndex;
+   if ( mLabelIndex >= 0 ) {
+      for (auto lt : tracks.Any<LabelTrack>()) {
+         const auto &labels = lt->GetLabels();
+         const auto nLabels = labels.size();
+         if( ii >= (int)nLabels )
+            ii -= nLabels;
+         else {
+            labelTrack = lt;
+            pLabel = &labels[ ii ];
+            break;
          }
       }
-      t = iter.Next();
    }
 
-   if ( (i< mLabelIndex) || (pLabel == NULL))
+   if ( !pLabel )
    {
       context.Error(wxT("LabelIndex was invalid."));
       return false;
    }
+   auto newLabel = *pLabel;
    if( bHasText )
-      pLabel->title = mText;
+      newLabel.title = mText;
    if( bHasT0 )
-      pLabel->selectedRegion.setT0(mT0, false);
+      newLabel.selectedRegion.setT0(mT0, false);
    if( bHasT1 )
-      pLabel->selectedRegion.setT1(mT1, false);
+      newLabel.selectedRegion.setT1(mT1, false);
    if( bHasT0 || bHasT1 )
-      pLabel->selectedRegion.ensureOrdering();
-   pLabel->updated = true;
+      newLabel.selectedRegion.ensureOrdering();
+   labelTrack->SetLabel( ii, newLabel );
 
    // Only one label can be selected.
-   if( bHasSelected ){
+   if( bHasSelected ) {
+      auto &view = LabelTrackView::Get( *labelTrack );
       if( mbSelected )
       {
-         labelTrack->mSelIndex = nn-1;
+         view.SetSelectedIndex( ii );
          double t0 = pLabel->selectedRegion.t0();
          double t1 = pLabel->selectedRegion.t1();
-         p->mViewInfo.selectedRegion.setTimes( t0, t1);
+         selectedRegion.setTimes( t0, t1);
       }
-      else if( labelTrack->mSelIndex == (nn-1) )
-         labelTrack->mSelIndex = -1;
+      else if( view.GetSelectedIndex( context.project ) == ii )
+         view.SetSelectedIndex( -1 );
    }
 
+   labelTrack->SortLabels();
    return true;
 }

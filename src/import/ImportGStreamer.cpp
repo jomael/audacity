@@ -23,15 +23,15 @@ Licensed under the GNU General Public License v2 or later
 
 *//*******************************************************************/
 
-#include "../Audacity.h"	// needed before GStreamer.h
+#include "../Audacity.h"	// needed before GStreamer.h // for USE_* macros
+
+#if defined(USE_GSTREAMER)
+#include "ImportGStreamer.h"
+
 #include <wx/window.h>
 #include <wx/log.h>
 
-#if defined(USE_GSTREAMER)
-
-#include "../MemoryX.h"
-
-#define DESC _("GStreamer-compatible files")
+#define DESC XO("GStreamer-compatible files")
 
 
 // On Windows we don't have configure script to turn this on or off,
@@ -46,14 +46,8 @@ Licensed under the GNU General Public License v2 or later
 #endif
 
 // all the includes live here by default
-#include "../AudacityException.h"
-#include "../SampleFormat.h"
 #include "../Tags.h"
-#include "../Internat.h"
 #include "../WaveTrack.h"
-#include "Import.h"
-#include "ImportPlugin.h"
-#include "ImportGStreamer.h"
 
 extern "C"
 {
@@ -130,7 +124,7 @@ struct GStreamContext
    GstElement    *mConv{};         // Audio converter
    GstElement    *mSink{};         // Application sink
    bool           mUse{};          // True if this stream should be imported
-   TrackHolders   mChannels;     // Array of WaveTrack pointers, one for each channel
+   NewChannelGroup mChannels;     // Array of WaveTrack pointers, one for each channel
    unsigned       mNumChannels{};  // Number of channels
    gdouble        mSampleRate{};   // Sample rate
    GstString      mType;         // Audio type
@@ -171,7 +165,7 @@ public:
    ///\return true if successful, false otherwise
    bool Init();
 
-   wxString GetFileDescription() override;
+   TranslatableString GetFileDescription() override;
    ByteCount GetFileUncompressedBytes() override;
 
    ///! Called by Import.cpp
@@ -180,7 +174,7 @@ public:
 
    ///! Called by Import.cpp
    ///\return array of strings - descriptions of the streams
-   const wxArrayString &GetStreamInfo() override;
+   const TranslatableStrings &GetStreamInfo() override;
 
    ///! Called by Import.cpp
    ///\param index - index of the stream in mStreamInfo and mStreams arrays
@@ -221,7 +215,7 @@ public:
    void OnNewSample(GStreamContext *c, GstSample *sample);
 
 private:
-   wxArrayString           mStreamInfo;   //!< Array of stream descriptions. Length is the same as mStreams
+   TranslatableStrings     mStreamInfo;   //!< Array of stream descriptions. Length is the same as mStreams
    Tags                    mTags;         //!< Tags to be passed back to Audacity
    TrackFactory           *mTrackFactory; //!< Factory to create tracks when samples arrive
 
@@ -232,7 +226,7 @@ private:
    bool                    mAsyncDone;    //!< true = 1st async-done message received
 
    GMutex                  mStreamsLock;  //!< Mutex protecting the mStreams array
-   std::vector<movable_ptr<GStreamContext>> mStreams;      //!< Array of pointers to stream contexts
+   std::vector<std::unique_ptr<GStreamContext>> mStreams;      //!< Array of pointers to stream contexts
 };
 
 /// A representative of GStreamer loader in
@@ -246,14 +240,15 @@ public:
    ///! Destructor
    virtual ~GStreamerImportPlugin();
 
-   wxString GetPluginFormatDescription();
+   TranslatableString GetPluginFormatDescription() override;
 
-   wxString GetPluginStringID();
+   wxString GetPluginStringID() override;
 
-   wxArrayString GetSupportedExtensions();
+   FileExtensions GetSupportedExtensions() override;
 
    ///! Probes the file and opens it if appropriate
-   std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
+   std::unique_ptr<ImportFileHandle> Open(
+      const wxString &Filename, AudacityProject*) override;
 };
 
 // ============================================================================
@@ -262,10 +257,10 @@ public:
 
 // ----------------------------------------------------------------------------
 // Instantiate GStreamerImportPlugin and add to the list of known importers
-void
-GetGStreamerImportPlugin(ImportPluginList &importPluginList,
-                         UnusableImportPluginList & WXUNUSED(unusableImportPluginList))
-{
+
+static
+Importer::RegisteredImportPlugin{ "GStreamer",
+   []() -> std::unique_ptr< ImportPlugin > {
    wxLogMessage(_TS("Audacity is built against GStreamer version %d.%d.%d-%d"),
                 GST_VERSION_MAJOR,
                 GST_VERSION_MINOR,
@@ -287,7 +282,7 @@ GetGStreamerImportPlugin(ImportPluginList &importPluginList,
       wxLogMessage(wxT("Failed to initialize GStreamer. Error %d: %s"),
                    error.get()->code,
                    wxString::FromUTF8(error.get()->message));
-      return;
+      return {};
    }
 
    guint major, minor, micro, nano;
@@ -299,15 +294,15 @@ GetGStreamerImportPlugin(ImportPluginList &importPluginList,
                 nano);
 
    // Instantiate plugin
-   auto plug = make_movable<GStreamerImportPlugin>();
+   auto plug = std::make_unique<GStreamerImportPlugin>();
 
    // No supported extensions...no gstreamer plugins installed
-   if (plug->GetSupportedExtensions().GetCount() == 0)
-      return;
+   if (plug->GetSupportedExtensions().size() == 0)
+      return {};
 
    // Add to list of importers
-   importPluginList.push_back( std::move(plug) );
-}
+   return std::move(plug);
+}() } registered;
 
 // ============================================================================
 // GStreamerImportPlugin Class
@@ -316,7 +311,7 @@ GetGStreamerImportPlugin(ImportPluginList &importPluginList,
 // ----------------------------------------------------------------------------
 // Constructor
 GStreamerImportPlugin::GStreamerImportPlugin()
-:  ImportPlugin(wxArrayString())
+:  ImportPlugin( {} )
 {
 }
 
@@ -328,7 +323,7 @@ GStreamerImportPlugin::~GStreamerImportPlugin()
 
 // ----------------------------------------------------------------------------
 // Return the plugin description
-wxString
+TranslatableString
 GStreamerImportPlugin::GetPluginFormatDescription()
 {
    return DESC;
@@ -344,13 +339,13 @@ GStreamerImportPlugin::GetPluginStringID()
 
 // Obtains a list of supported extensions from typefind factories
 // TODO: improve the list. It is obviously incomplete.
-wxArrayString
+FileExtensions
 GStreamerImportPlugin::GetSupportedExtensions()
 {
    // We refresh the extensions each time this is called in case the
    // user had installed additional gstreamer plugins while Audacity
    // was active.
-   mExtensions.Empty();
+   mExtensions.clear();
 
    // Gather extensions from all factories that support audio
    {
@@ -391,7 +386,7 @@ GStreamerImportPlugin::GetSupportedExtensions()
                wxString extension = wxString::FromUTF8(extensions[i]);
                if (mExtensions.Index(extension, false) == wxNOT_FOUND)
                {
-                  mExtensions.Add(extension);
+                  mExtensions.push_back(extension);
                }
             }
          }
@@ -403,7 +398,7 @@ GStreamerImportPlugin::GetSupportedExtensions()
 
    // Log it for debugging
    wxString extensions = wxT("Extensions:");
-   for (size_t i = 0; i < mExtensions.GetCount(); i++)
+   for (size_t i = 0; i < mExtensions.size(); i++)
    {
       extensions = extensions + wxT(" ") + mExtensions[i];
    }
@@ -414,7 +409,8 @@ GStreamerImportPlugin::GetSupportedExtensions()
 
 // ----------------------------------------------------------------------------
 // Open the file and return an importer "file handle"
-std::unique_ptr<ImportFileHandle> GStreamerImportPlugin::Open(const wxString &filename)
+std::unique_ptr<ImportFileHandle> GStreamerImportPlugin::Open(
+   const wxString &filename, AudacityProject*)
 {
    auto handle = std::make_unique<GStreamerImportFileHandle>(filename);
 
@@ -569,7 +565,7 @@ GStreamerImportFileHandle::OnPadAdded(GstPad *pad)
 
       {
          // Allocate a NEW stream context
-         auto uc = make_movable<GStreamContext>();
+         auto uc = std::make_unique<GStreamContext>();
          c = uc.get();
          if (!c)
          {
@@ -670,7 +666,7 @@ GStreamerImportFileHandle::OnPadAdded(GstPad *pad)
    // Link them together
    if (!gst_element_link(c->mConv, c->mSink))
    {
-      WARN(mPipeline.get(), ("OnPadAdded: failed to link autioconvert and appsink"));
+      WARN(mPipeline.get(), ("OnPadAdded: failed to link audioconvert and appsink"));
       return;
    }
 
@@ -789,14 +785,6 @@ GStreamerImportFileHandle::OnNewSample(GStreamContext *c, GstSample *sample)
             return;
          }
       }
-
-      // Set to stereo if there's exactly 2 channels
-      if (c->mNumChannels == 2)
-      {
-         c->mChannels[0]->SetChannel(Track::LeftChannel);
-         c->mChannels[1]->SetChannel(Track::RightChannel);
-         c->mChannels[0]->SetLinked(true);
-      }
    }
 
    // Get the buffer for the sample...no need to release
@@ -900,12 +888,12 @@ GStreamerImportFileHandle::~GStreamerImportFileHandle()
 wxInt32
 GStreamerImportFileHandle::GetStreamCount()
 {
-   return mStreamInfo.GetCount();
+   return mStreamInfo.size();
 }
 
 // ----------------------------------------------------------------------------
 // Return array of strings - descriptions of the streams
-const wxArrayString &
+const TranslatableStrings &
 GStreamerImportFileHandle::GetStreamInfo()
 {
    return mStreamInfo;
@@ -955,8 +943,9 @@ GStreamerImportFileHandle::Init()
    // Add the decoder to the pipeline
    if (!gst_bin_add(GST_BIN(mPipeline.get()), mDec))
    {
-      AudacityMessageBox(_("Unable to add decoder to pipeline"),
-                   _("GStreamer Importer"));
+      AudacityMessageBox(
+         XO("Unable to add decoder to pipeline"),
+         XO("GStreamer Importer"));
 
       // Cleanup expected to occur in destructor
       return false;
@@ -966,8 +955,9 @@ GStreamerImportFileHandle::Init()
    GstStateChangeReturn state = gst_element_set_state(mPipeline.get(), GST_STATE_PAUSED);
    if (state == GST_STATE_CHANGE_FAILURE)
    {
-      AudacityMessageBox(_("Unable to set stream state to paused."),
-                   _("GStreamer Importer"));
+      AudacityMessageBox(
+         XO("Unable to set stream state to paused."),
+         XO("GStreamer Importer"));
       return false;
    }
 
@@ -993,13 +983,13 @@ GStreamerImportFileHandle::Init()
       GStreamContext *c = mStreams[i].get();
 
       // Create stream info string
-      wxString strinfo;
-      strinfo.Printf(wxT("Index[%02d], Type[%s], Channels[%d], Rate[%d]"),
-                     (unsigned int) i,
-                     wxString::FromUTF8(c->mType.get()),
-                     (int) c->mNumChannels,
-                     (int) c->mSampleRate);
-      mStreamInfo.Add(strinfo);
+      auto strinfo = XO("Index[%02d], Type[%s], Channels[%d], Rate[%d]")
+         .Format(
+            (unsigned int) i,
+            wxString::FromUTF8(c->mType.get()),
+            (int) c->mNumChannels,
+            (int) c->mSampleRate );
+      mStreamInfo.push_back(strinfo);
    }
 
    return success;
@@ -1007,7 +997,7 @@ GStreamerImportFileHandle::Init()
 
 // ----------------------------------------------------------------------------
 // Return file dialog filter description
-wxString
+TranslatableString
 GStreamerImportFileHandle::GetFileDescription()
 {
    return DESC;
@@ -1033,7 +1023,7 @@ GStreamerImportFileHandle::Import(TrackFactory *trackFactory,
    // Save track factory pointer
    mTrackFactory = trackFactory;
 
-   // Create the progrress dialog
+   // Create the progress dialog
    CreateProgress();
 
    // Block streams that are to be bypassed
@@ -1095,8 +1085,9 @@ GStreamerImportFileHandle::Import(TrackFactory *trackFactory,
    // Can't do much if we don't have any streams to process
    if (!haveStreams)
    {
-      AudacityMessageBox(_("File doesn't contain any audio streams."),
-                   _("GStreamer Importer"));
+      AudacityMessageBox(
+         XO("File doesn't contain any audio streams."),
+         XO("GStreamer Importer"));
       return ProgressResult::Failed;
    }
 
@@ -1104,8 +1095,9 @@ GStreamerImportFileHandle::Import(TrackFactory *trackFactory,
    GstStateChangeReturn state = gst_element_set_state(mPipeline.get(), GST_STATE_PLAYING);
    if (state == GST_STATE_CHANGE_FAILURE)
    {
-      AudacityMessageBox(_("Unable to import file, state change failed."),
-                   _("GStreamer Importer"));
+      AudacityMessageBox(
+         XO("Unable to import file, state change failed."),
+         XO("GStreamer Importer"));
       return ProgressResult::Failed;
    }
 
@@ -1140,18 +1132,6 @@ GStreamerImportFileHandle::Import(TrackFactory *trackFactory,
    // Grab the streams lock
    g_mutex_locker locker{ mStreamsLock };
 
-   // Count the total number of tracks collected
-   unsigned outNumTracks = 0;
-   for (guint s = 0; s < mStreams.size(); s++)
-   {
-      GStreamContext *c = mStreams[s].get();
-      if (c)
-         outNumTracks += c->mNumChannels;
-   }
-
-   // Create NEW tracks
-   outTracks.resize(outNumTracks);
-
    // Copy audio from mChannels to newly created tracks (destroying mChannels in process)
    int trackindex = 0;
    for (guint s = 0; s < mStreams.size(); s++)
@@ -1160,12 +1140,8 @@ GStreamerImportFileHandle::Import(TrackFactory *trackFactory,
       if (c->mNumChannels)
       {
          for (int ch = 0; ch < c->mNumChannels; ch++)
-         {
             c->mChannels[ch]->Flush();
-            outTracks[trackindex++] = std::move(c->mChannels[ch]);
-         }
-
-         c->mChannels.clear();
+         outTracks.push_back(std::move(c->mChannels));
       }
    }
 
@@ -1201,7 +1177,7 @@ GStreamerImportFileHandle::ProcessBusMessage(bool & success)
       return cont;
    }
 
-#if defined(__WXDEBUG__)
+#if defined(_DEBUG)
    {
       GstString objname;
       if (msg->src != NULL)
@@ -1234,10 +1210,11 @@ GStreamerImportFileHandle::ProcessBusMessage(bool & success)
                wxString::FromUTF8(err.get()->message),
                debug ? wxT("\n") : wxT(""),
                debug ? wxString::FromUTF8(debug.get()) : wxT(""));
+            auto msg = XO("GStreamer Error: %s").Format( m );
 #if defined(_DEBUG)
-            AudacityMessageBox(wxString::Format(_("GStreamer Error: %s"), m));
+            AudacityMessageBox( msg );
 #else
-            wxLogMessage(wxT("GStreamer Error: %s"), m);
+            wxLogMessage( msg.Debug() );
 #endif
          }
 

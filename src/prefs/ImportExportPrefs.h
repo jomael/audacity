@@ -15,17 +15,25 @@
 
 #include <wx/defs.h>
 
-#include <wx/window.h>
-
 #include "PrefsPanel.h"
 
 class ShuttleGui;
 
+#define IMPORT_EXPORT_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("IMPORT EXPORT") }
+
+template< typename Enum > class EnumSetting;
+
 class ImportExportPrefs final : public PrefsPanel
 {
  public:
+   static EnumSetting< bool > ExportDownMixSetting;
+   static EnumSetting< bool > AllegroStyleSetting;
+
    ImportExportPrefs(wxWindow * parent, wxWindowID winid);
    ~ImportExportPrefs();
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
+
    bool Commit() override;
    wxString HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
@@ -34,9 +42,4 @@ class ImportExportPrefs final : public PrefsPanel
    void Populate();
 };
 
-class ImportExportPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
 #endif

@@ -21,8 +21,9 @@
 
 #include "WaveClip.h"
 
+#include "Experimental.h"
+
 #include <math.h>
-#include "MemoryX.h"
 #include <functional>
 #include <vector>
 #include <wx/log.h>
@@ -32,18 +33,13 @@
 #include "Prefs.h"
 #include "Envelope.h"
 #include "Resample.h"
-#include "Project.h"
 #include "WaveTrack.h"
-#include "FFT.h"
 #include "Profiler.h"
 #include "InconsistencyException.h"
 #include "UserException.h"
 
 #include "prefs/SpectrogramSettings.h"
-
-#include <wx/listimpl.cpp>
-
-#include "Experimental.h"
+#include "widgets/ProgressDialog.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -255,11 +251,11 @@ public:
          LoadInvalidRegion(i, sequence, updateODCount);
    }
 
-   int CountODPixels(size_t start, size_t end)
+   int CountODPixels(size_t startIn, size_t endIn)
    {
       using namespace std;
       const int *begin = &bl[0];
-      return count_if(begin + start, begin + end, bind2nd(less<int>(), 0));
+      return count_if(begin + startIn, begin + endIn, bind2nd(less<int>(), 0));
    }
 
 protected:
@@ -333,7 +329,7 @@ WaveClip::WaveClip(const WaveClip& orig,
    if ( copyCutlines )
       for (const auto &clip: orig.mCutLines)
          mCutLines.push_back
-            ( make_movable<WaveClip>( *clip, projDirManager, true ) );
+            ( std::make_unique<WaveClip>( *clip, projDirManager, true ) );
 
    mIsPlaceholder = orig.GetIsPlaceholder();
 }
@@ -377,7 +373,7 @@ WaveClip::WaveClip(const WaveClip& orig,
          if (cutlinePosition >= t0 && cutlinePosition <= t1)
          {
             auto newCutLine =
-               make_movable< WaveClip >( *clip, projDirManager, true );
+               std::make_unique< WaveClip >( *clip, projDirManager, true );
             newCutLine->SetOffset( cutlinePosition - t0 );
             mCutLines.push_back(std::move(newCutLine));
          }
@@ -418,6 +414,11 @@ BlockArray* WaveClip::GetSequenceBlockArray()
    return &mSequence->GetBlockArray();
 }
 
+const BlockArray* WaveClip::GetSequenceBlockArray() const
+{
+   return &mSequence->GetBlockArray();
+}
+
 double WaveClip::GetStartTime() const
 {
    // JS: mOffset is the minimum value and it is returned; no clipping to 0
@@ -450,6 +451,11 @@ sampleCount WaveClip::GetNumSamples() const
    return mSequence->GetNumSamples();
 }
 
+// Bug 2288 allowed overlapping clips.
+// This was a classic fencepost error.
+// We are within the clip if start < t <= end.
+// Note that BeforeClip and AfterClip must be consistent 
+// with this definition.
 bool WaveClip::WithinClip(double t) const
 {
    auto ts = (sampleCount)floor(t * mRate + 0.5);
@@ -467,6 +473,16 @@ bool WaveClip::AfterClip(double t) const
    auto ts = (sampleCount)floor(t * mRate + 0.5);
    return ts >= GetEndSample() + mAppendBufferLen;
 }
+
+// A sample at time t could be in the clip, but 
+// a clip start at time t still be from a clip 
+// not overlapping this one, with this test.
+bool WaveClip::IsClipStartAfterClip(double t) const
+{
+   auto ts = (sampleCount)floor(t * mRate + 0.5);
+   return ts >= GetEndSample() + mAppendBufferLen;
+}
+
 
 ///Delete the wave cache - force redraw.  Thread-safe
 void WaveClip::ClearWaveCache()
@@ -830,7 +846,7 @@ bool SpecCache::CalculateOneSpectrum
    bool result = false;
    const bool reassignment =
       (settings.algorithm == SpectrogramSettings::algReassignment);
-   const size_t windowSize = settings.WindowSize();
+   const size_t windowSizeSetting = settings.WindowSize();
 
    sampleCount from;
 
@@ -851,9 +867,9 @@ bool SpecCache::CalculateOneSpectrum
 
    const bool autocorrelation =
       settings.algorithm == SpectrogramSettings::algPitchEAC;
-   const size_t zeroPaddingFactor = settings.ZeroPaddingFactor();
-   const size_t padding = (windowSize * (zeroPaddingFactor - 1)) / 2;
-   const size_t fftLen = windowSize * zeroPaddingFactor;
+   const size_t zeroPaddingFactorSetting = settings.ZeroPaddingFactor();
+   const size_t padding = (windowSizeSetting * (zeroPaddingFactorSetting - 1)) / 2;
+   const size_t fftLen = windowSizeSetting * zeroPaddingFactorSetting;
    auto nBins = settings.NBins();
 
    if (from < 0 || from >= numSamples) {
@@ -872,9 +888,9 @@ bool SpecCache::CalculateOneSpectrum
       float *adj = scratch + padding;
 
       {
-         auto myLen = windowSize;
+         auto myLen = windowSizeSetting;
          // Take a window of the track centered at this sample.
-         from -= windowSize >> 1;
+         from -= windowSizeSetting >> 1;
          if (from < 0) {
             // Near the start of the clip, pad left with zeroes as needed.
             // from is at least -windowSize / 2
@@ -922,7 +938,7 @@ bool SpecCache::CalculateOneSpectrum
          wxASSERT(xx >= 0);
          float *const results = &out[nBins * xx];
          // This function does not mutate useBuffer
-         ComputeSpectrum(useBuffer, windowSize, windowSize,
+         ComputeSpectrum(useBuffer, windowSizeSetting, windowSizeSetting,
             rate, results,
             autocorrelation, settings.windowType);
       }
@@ -1032,7 +1048,7 @@ bool SpecCache::CalculateOneSpectrum
          ComputeSpectrumUsingRealFFTf
             (useBuffer, settings.hFFT.get(), settings.window.get(), fftLen, results);
          if (!gainFactors.empty()) {
-            // Apply a frequency-dependant gain factor
+            // Apply a frequency-dependent gain factor
             for (size_t ii = 0; ii < nBins; ++ii)
                results[ii] += gainFactors[ii];
          }
@@ -1071,21 +1087,21 @@ void SpecCache::Populate
     sampleCount numSamples,
     double offset, double rate, double pixelsPerSecond)
 {
-   const int &frequencyGain = settings.frequencyGain;
-   const size_t windowSize = settings.WindowSize();
+   const int &frequencyGainSetting = settings.frequencyGain;
+   const size_t windowSizeSetting = settings.WindowSize();
    const bool autocorrelation =
       settings.algorithm == SpectrogramSettings::algPitchEAC;
    const bool reassignment =
       settings.algorithm == SpectrogramSettings::algReassignment;
 #ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
-   const size_t zeroPaddingFactor = settings.ZeroPaddingFactor();
+   const size_t zeroPaddingFactorSetting = settings.ZeroPaddingFactor();
 #else
-   const size_t zeroPaddingFactor = 1;
+   const size_t zeroPaddingFactorSetting = 1;
 #endif
 
    // FFT length may be longer than the window of samples that affect results
    // because of zero padding done for increased frequency resolution
-   const size_t fftLen = windowSize * zeroPaddingFactor;
+   const size_t fftLen = windowSizeSetting * zeroPaddingFactorSetting;
    const auto nBins = settings.NBins();
 
    const size_t bufferSize = fftLen;
@@ -1094,7 +1110,7 @@ void SpecCache::Populate
 
    std::vector<float> gainFactors;
    if (!autocorrelation)
-      ComputeSpectrogramGainFactors(fftLen, rate, frequencyGain, gainFactors);
+      ComputeSpectrogramGainFactors(fftLen, rate, frequencyGainSetting, gainFactors);
 
    // Loop over the ranges before and after the copied portion and compute anew.
    // One of the ranges may be empty.
@@ -1175,7 +1191,7 @@ void SpecCache::Populate
 #ifdef _OPENMP
          #pragma omp parallel for
 #endif
-         for (auto xx = lowerBoundX; xx < upperBoundX; ++xx) {
+         for (xx = lowerBoundX; xx < upperBoundX; ++xx) {
             float *const results = &freq[nBins * xx];
             for (size_t ii = 0; ii < nBins; ++ii) {
                float &power = results[ii];
@@ -1185,7 +1201,7 @@ void SpecCache::Populate
                   power = 10.0*log10f(power);
             }
             if (!gainFactors.empty()) {
-               // Apply a frequency-dependant gain factor
+               // Apply a frequency-dependent gain factor
                for (size_t ii = 0; ii < nBins; ++ii)
                   results[ii] += gainFactors[ii];
             }
@@ -1200,7 +1216,7 @@ bool WaveClip::GetSpectrogram(WaveTrackCache &waveTrackCache,
                               size_t numPixels,
                               double t0, double pixelsPerSecond) const
 {
-   const WaveTrack *const track = waveTrackCache.GetTrack();
+   const WaveTrack *const track = waveTrackCache.GetTrack().get();
    const SpectrogramSettings &settings = track->GetSpectrogramSettings();
 
    bool match =
@@ -1447,24 +1463,11 @@ void WaveClip::Append(samplePtr buffer, sampleFormat format,
    }
 }
 
-void WaveClip::AppendAlias(const wxString &fName, sampleCount start,
-                            size_t len, int channel,bool useOD)
+void WaveClip::AppendBlockFile( const BlockFileFactory &factory, size_t len)
 // STRONG-GUARANTEE
 {
    // use STRONG-GUARANTEE
-   mSequence->AppendAlias(fName, start, len, channel,useOD);
-
-   // use NOFAIL-GUARANTEE
-   UpdateEnvelopeTrackLen();
-   MarkChanged();
-}
-
-void WaveClip::AppendCoded(const wxString &fName, sampleCount start,
-                            size_t len, int channel, int decodeType)
-// STRONG-GUARANTEE
-{
-   // use STRONG-GUARANTEE
-   mSequence->AppendCoded(fName, start, len, channel, decodeType);
+   mSequence->AppendBlockFile( factory, len );
 
    // use NOFAIL-GUARANTEE
    UpdateEnvelopeTrackLen();
@@ -1552,7 +1555,7 @@ XMLTagHandler *WaveClip::HandleXMLChild(const wxChar *tag)
    {
       // Nested wave clips are cut lines
       mCutLines.push_back(
-         make_movable<WaveClip>(mSequence->GetDirManager(),
+         std::make_unique<WaveClip>(mSequence->GetDirManager(),
             mSequence->GetSampleFormat(), mRate, 0 /*colourindex*/));
       return mCutLines.back().get();
    }
@@ -1608,7 +1611,7 @@ void WaveClip::Paste(double t0, const WaveClip* other)
    for (const auto &cutline: pastedClip->mCutLines)
    {
       newCutlines.push_back(
-         make_movable<WaveClip>
+         std::make_unique<WaveClip>
             ( *cutline, mSequence->GetDirManager(),
               // Recursively copy cutlines of cutlines.  They don't need
               // their offsets adjusted.
@@ -1625,7 +1628,7 @@ void WaveClip::Paste(double t0, const WaveClip* other)
    // Assume NOFAIL-GUARANTEE in the remaining
    MarkChanged();
    auto sampleTime = 1.0 / GetRate();
-   mEnvelope->Paste
+   mEnvelope->PasteEnvelope
       (s0.as_double()/mRate + mOffset, pastedClip->mEnvelope.get(), sampleTime);
    OffsetCutLines(t0, pastedClip->GetEndTime() - pastedClip->GetStartTime());
 
@@ -1745,7 +1748,7 @@ void WaveClip::ClearAndAddCutLine(double t0, double t1)
    const double clip_t0 = std::max( t0, GetStartTime() );
    const double clip_t1 = std::min( t1, GetEndTime() );
 
-   auto newClip = make_movable< WaveClip >
+   auto newClip = std::make_unique< WaveClip >
       (*this, mSequence->GetDirManager(), true, clip_t0, clip_t1);
 
    newClip->SetOffset( clip_t0 - mOffset );
@@ -1964,7 +1967,7 @@ void WaveClip::Resample(int rate, ProgressDialog *progress)
 
    if (error)
       throw SimpleMessageBoxException{
-         _("Resampling failed.")
+         XO("Resampling failed.")
       };
    else
    {

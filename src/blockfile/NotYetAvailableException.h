@@ -10,7 +10,6 @@
 #define __AUDACITY_NOT_YET_AVAILABLE_EXCEPTION__
 
 #include "../FileException.h"
-#include <wx/filename.h>
 
 // This exception can be thrown when attempting read of on-demand block files
 // that have not yet completed loading.
@@ -25,8 +24,7 @@ public:
    ~NotYetAvailableException();
 
 protected:
-   std::unique_ptr< AudacityException > Move() override;
-   wxString ErrorMessage() const override;
+   TranslatableString ErrorMessage() const override;
 };
 
 #endif

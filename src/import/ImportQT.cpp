@@ -13,15 +13,16 @@
 
 **********************************************************************/
 
-#include "../Audacity.h"
-#include "ImportQT.h"
+#include "../Audacity.h" // for USE_* macros
+
+#include "Import.h"
 #include "ImportPlugin.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
+#include "../widgets/ProgressDialog.h"
 
-#define DESC _("QuickTime files")
+#define DESC XO("QuickTime files")
 
-static const wxChar *exts[] =
-{
+static const auto exts = {
    wxT("aif"),
    wxT("aifc"),
    wxT("aiff"),
@@ -37,14 +38,17 @@ static const wxChar *exts[] =
 
 #ifndef USE_QUICKTIME
 
-void GetQTImportPlugin(ImportPluginList &importPluginList,
-                       UnusableImportPluginList &unusableImportPluginList)
-{
-   unusableImportPluginList.push_back(
-      make_movable<UnusableImportPlugin>
-         (DESC, wxArrayString(WXSIZEOF(exts), exts))
-   );
-}
+// Bug 2068: misleading error message about QuickTime
+// In 64 bit versions we cannot compile in (obsolete) QuickTime
+// So don't register the QuickTime extensions, so ensuring we never report
+// "This version of Audacity was not compiled with QuickTime files support"  
+// When attempting to import MP4 files.
+/*
+static Importer::RegisteredUnusableImportPlugin registered{
+      std::make_unique<UnusableImportPlugin>(DESC,
+         FileExtensions( exts.begin(), exts.end() ) )
+};
+*/
 
 #else /* USE_QUICKTIME */
 
@@ -72,7 +76,6 @@ void GetQTImportPlugin(ImportPluginList &importPluginList,
 // There's a name collision between our Track and QuickTime's...workaround it
 #undef Track
 
-#include "../Internat.h"
 #include "../Tags.h"
 #include "../WaveTrack.h"
 
@@ -82,7 +85,7 @@ class QTImportPlugin final : public ImportPlugin
 {
  public:
    QTImportPlugin()
-   :  ImportPlugin(wxArrayString(WXSIZEOF(exts), exts)),
+   :  ImportPlugin( FileExtensions( exts.begin(), exts.end() ) ),
       mInitialized(false)
    {
       OSErr err = noErr;
@@ -116,10 +119,11 @@ class QTImportPlugin final : public ImportPlugin
       mInitialized = false;
    }
 
-   wxString GetPluginStringID() { return wxT("quicktime"); }
+   wxString GetPluginStringID() override { return wxT("quicktime"); }
 
-   wxString GetPluginFormatDescription();
-   std::unique_ptr<ImportFileHandle> Open(const wxString & Filename) override;
+   TranslatableString GetPluginFormatDescription() override;
+   std::unique_ptr<ImportFileHandle> Open(
+      const wxString & Filename, AudacityProject*) override;
 
  private:
    bool mInitialized;
@@ -142,7 +146,7 @@ class QTImportFileHandle final : public ImportFileHandle
       }
    }
 
-   wxString GetFileDescription() override;
+   TranslatableString GetFileDescription() override;
    ByteCount GetFileUncompressedBytes() override;
 
    wxInt32 GetStreamCount() override
@@ -150,9 +154,9 @@ class QTImportFileHandle final : public ImportFileHandle
       return 1;
    }
 
-   const wxArrayString &GetStreamInfo() override
+   const TranslatableStrings &GetStreamInfo() override
    {
-      static wxArrayString empty;
+      static TranslatableStrings empty;
       return empty;
    }
 
@@ -170,18 +174,13 @@ class QTImportFileHandle final : public ImportFileHandle
    Movie mMovie;
 };
 
-void GetQTImportPlugin(ImportPluginList &importPluginList,
-                       UnusableImportPluginList &unusableImportPluginList)
-{
-   importPluginList.push_back( make_movable<QTImportPlugin>() );
-}
-
-wxString QTImportPlugin::GetPluginFormatDescription()
+TranslatableString QTImportPlugin::GetPluginFormatDescription()
 {
    return DESC;
 }
 
-std::unique_ptr<ImportFileHandle> QTImportPlugin::Open(const wxString & Filename)
+std::unique_ptr<ImportFileHandle> QTImportPlugin::Open(
+   const wxString & Filename, AudacityProject*)
 {
    OSErr err;
    FSRef inRef;
@@ -221,8 +220,12 @@ std::unique_ptr<ImportFileHandle> QTImportPlugin::Open(const wxString & Filename
    return std::make_unique<QTImportFileHandle>(Filename, theMovie);
 }
 
+static Importer::RegisteredImportPlugin registered{ "QT",
+   std::make_unique< QTImportPlugin >()
+};
 
-wxString QTImportFileHandle::GetFileDescription()
+
+TranslatableString QTImportFileHandle::GetFileDescription()
 {
    return DESC;
 }
@@ -262,7 +265,7 @@ ProgressResult QTImportFileHandle::Import(TrackFactory *trackFactory,
    {
       err = MovieAudioExtractionBegin(mMovie, 0, &maer);
       if (err != noErr) {
-         AudacityMessageBox(_("Unable to start QuickTime extraction"));
+         AudacityMessageBox( XO("Unable to start QuickTime extraction") );
          break;
       }
    
@@ -272,7 +275,7 @@ ProgressResult QTImportFileHandle::Import(TrackFactory *trackFactory,
                                             sizeof(quality),
                                             &quality);
       if (err != noErr) {
-         AudacityMessageBox(_("Unable to set QuickTime render quality"));
+         AudacityMessageBox( XO("Unable to set QuickTime render quality") );
          break;
       }
    
@@ -282,7 +285,8 @@ ProgressResult QTImportFileHandle::Import(TrackFactory *trackFactory,
                                             sizeof(discrete),
                                             &discrete);
       if (err != noErr) {
-         AudacityMessageBox(_("Unable to set QuickTime discrete channels property"));
+         AudacityMessageBox( XO(
+"Unable to set QuickTime discrete channels property") );
          break;
       }
    
@@ -293,7 +297,8 @@ ProgressResult QTImportFileHandle::Import(TrackFactory *trackFactory,
                                             &maxSampleSize,
                                             NULL);
       if (err != noErr) {
-         AudacityMessageBox(_("Unable to get QuickTime sample size property"));
+         AudacityMessageBox( XO(
+"Unable to get QuickTime sample size property") );
          break;
       }
    
@@ -304,7 +309,7 @@ ProgressResult QTImportFileHandle::Import(TrackFactory *trackFactory,
                                             &desc,
                                             NULL);
       if (err != noErr) {
-         AudacityMessageBox(_("Unable to retrieve stream description"));
+         AudacityMessageBox( XO("Unable to retrieve stream description") );
          break;
       }
    
@@ -336,7 +341,7 @@ ProgressResult QTImportFileHandle::Import(TrackFactory *trackFactory,
                (sizeof(AudioBuffer) * numchan))) };
       abl->mNumberBuffers = numchan;
    
-      TrackHolders channels{ numchan };
+      NewChannelGroup channels{ numchan };
 
       const auto size = sizeof(float) * bufsize;
       ArraysOf<unsigned char> holders{ numchan, size };
@@ -352,16 +357,6 @@ ProgressResult QTImportFileHandle::Import(TrackFactory *trackFactory,
    
          channel = trackFactory->NewWaveTrack( format );
          channel->SetRate( desc.mSampleRate );
-   
-         if (numchan == 2) {
-            if (c == 0) {
-               channel->SetChannel(Track::LeftChannel);
-               channel->SetLinked(true);
-            }
-            else if (c == 1) {
-               channel->SetChannel(Track::RightChannel);
-            }
-         }
       }
    
       do {
@@ -373,7 +368,7 @@ ProgressResult QTImportFileHandle::Import(TrackFactory *trackFactory,
                                               abl.get(),
                                               &flags);
          if (err != noErr) {
-            AudacityMessageBox(_("Unable to get fill buffer"));
+            AudacityMessageBox( XO("Unable to get fill buffer") );
             break;
          }
    
@@ -395,11 +390,10 @@ ProgressResult QTImportFileHandle::Import(TrackFactory *trackFactory,
       res = (updateResult == ProgressResult::Success && err == noErr);
    
       if (res) {
-         for (const auto &channel: channels) {
+         for (auto &channel: channels)
             channel->Flush();
-         }
-   
-         outTracks.swap(channels);
+         if (!channels.empty())
+            outTracks.push_back(std::move(channels));
       }
 
       //
@@ -522,7 +516,7 @@ void QTImportFileHandle::AddMetadata(Tags *tags)
       if (err != noErr)
          continue;
 
-      wxString v = wxT("");
+      wxString v;
 
       switch (dataType)
       {
@@ -537,7 +531,7 @@ void QTImportFileHandle::AddMetadata(Tags *tags)
          break;
       }
 
-      if (!v.IsEmpty()) {
+      if (!v.empty()) {
          tags->SetTag(names[i].name, v);
       }
    }

@@ -14,7 +14,6 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../UIHandle.h"
 
 class wxMouseState;
-#include <wx/gdicmn.h>
 
 // This handle class, unlike most, doesn't associate with any particular cell.
 class ZoomHandle final : public UIHandle
@@ -42,7 +41,7 @@ public:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release
@@ -51,12 +50,17 @@ public:
 
    Result Cancel(AudacityProject *pProject) override;
 
-   void DrawExtras
-      (DrawingPass pass,
-       wxDC * dc, const wxRegion &updateRegion, const wxRect &panelRect)
-      override;
-
 private:
+
+   // TrackPanelDrawable implementation
+   void Draw(
+      TrackPanelDrawingContext &context,
+      const wxRect &rect, unsigned iPass ) override;
+
+   wxRect DrawingArea(
+      TrackPanelDrawingContext &,
+      const wxRect &rect, const wxRect &panelRect, unsigned iPass ) override;
+
    bool IsDragZooming() const;
 
    int mZoomStart{}, mZoomEnd{};

@@ -10,24 +10,22 @@
 #ifndef __AUDACITY_EFFECT_PAULSTRETCH__
 #define __AUDACITY_EFFECT_PAULSTRETCH__
 
-#include <wx/string.h>
-
 #include "Effect.h"
 
 class ShuttleGui;
 
-#define PAULSTRETCH_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Paulstretch") }
-
 class EffectPaulstretch final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectPaulstretch();
    virtual ~EffectPaulstretch();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
    wxString ManualPage() override;
 
    // EffectDefinitionInterface implementation

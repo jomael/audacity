@@ -15,10 +15,16 @@
 *//*******************************************************************/
 
 #include "../Audacity.h"
+#include "Invert.h"
 
 #include <wx/intl.h>
 
-#include "Invert.h"
+#include "LoadEffects.h"
+
+const ComponentInterfaceSymbol EffectInvert::Symbol
+{ XO("Invert") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectInvert > reg; }
 
 EffectInvert::EffectInvert()
 {
@@ -28,16 +34,16 @@ EffectInvert::~EffectInvert()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectInvert::GetSymbol()
+ComponentInterfaceSymbol EffectInvert::GetSymbol()
 {
-   return INVERT_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectInvert::GetDescription()
+TranslatableString EffectInvert::GetDescription()
 {
-   return _("Flips the audio samples upside-down, reversing their polarity");
+   return XO("Flips the audio samples upside-down, reversing their polarity");
 }
 
 // EffectDefinitionInterface implementation

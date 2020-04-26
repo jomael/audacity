@@ -14,11 +14,11 @@
 #ifndef __AUDACITY_EDIT_TOOLBAR__
 #define __AUDACITY_EDIT_TOOLBAR__
 
+#include "../Experimental.h"
+
 #include <wx/defs.h>
 
 #include "ToolBar.h"
-#include "../Theme.h"
-#include "../Experimental.h"
 
 class wxCommandEvent;
 class wxDC;
@@ -74,7 +74,7 @@ class EditToolBar final : public ToolBar {
 
  public:
 
-   EditToolBar();
+   EditToolBar( AudacityProject &project );
    virtual ~EditToolBar();
 
    void Create(wxWindow *parent) override;
@@ -91,7 +91,7 @@ class EditToolBar final : public ToolBar {
    static AButton *AddButton(
       EditToolBar *pBar,
       teBmps eEnabledUp, teBmps eEnabledDown, teBmps eDisabled,
-      int id, const wxChar *label, bool toggle = false);
+      int id, const TranslatableString &label, bool toggle = false);
 
    void AddSeparator();
 

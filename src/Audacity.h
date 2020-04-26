@@ -61,7 +61,7 @@
 
 // Increment as appropriate every time we release a NEW version.
 #define AUDACITY_VERSION   2
-#define AUDACITY_RELEASE   3
+#define AUDACITY_RELEASE   4
 #define AUDACITY_REVISION  0
 #define AUDACITY_MODLEVEL  0
 
@@ -108,9 +108,6 @@
 #define AUDACITY_FILE_FORMAT_VERSION "1.3.0"
 
 class wxWindow;
-
-void QuitAudacity(bool bForce);
-void QuitAudacity();
 
 // Please try to support unlimited path length instead of using PLATFORM_MAX_PATH!
 // Define one constant for maximum path value, so we don't have to do
@@ -212,7 +209,7 @@ void QuitAudacity();
 
 // These macros are used widely, so declared here.
 #define QUANTIZED_TIME(time, rate) (floor(((double)(time) * (rate)) + 0.5) / (rate))
-// dB - linear amplitude convesions
+// dB - linear amplitude conversions
 #define DB_TO_LINEAR(x) (pow(10.0, (x) / 20.0))
 #define LINEAR_TO_DB(x) (20.0 * log10(x))
 
@@ -228,5 +225,22 @@ void QuitAudacity();
 // You may use it in NEW code when the NEW expression is the constructor argument for a standard smart
 // pointer like std::unique_ptr or std::shared_ptr.
 #define safenew new
+
+// Right to left languages fail in many wx3 dialogs with missing buttons.
+// The workaround is to use LTR in those dialogs.
+#ifndef __WXMAC__
+#define RTL_WORKAROUND( pWnd ) \
+   if ( gPrefs->Read( "/GUI/RtlWorkaround", true) ) \
+       pWnd->SetLayoutDirection(wxLayout_LeftToRight); 
+#else
+   #define RTL_WORKAROUND( pWnd ) 
+#endif
+
+// Define/undefine _DEBUG based on the (CMake provided) NDEBUG symbol
+#if defined(NDEBUG)
+   #undef _DEBUG
+#else
+   #define _DEBUG 1
+#endif
 
 #endif // __AUDACITY_H__

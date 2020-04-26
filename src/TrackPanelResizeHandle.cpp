@@ -10,22 +10,21 @@ Paul Licameli split from TrackPanel.cpp
 
 #include "Audacity.h"
 #include "TrackPanelResizeHandle.h"
-#include "Experimental.h"
-
-#include "MemoryX.h"
 
 #include <wx/cursor.h>
 #include <wx/translation.h>
 
 #include "HitTestResult.h"
-#include "Project.h"
+#include "ProjectHistory.h"
 #include "RefreshCode.h"
 #include "Track.h"
 #include "TrackPanelMouseEvent.h"
-#include "tracks/ui/TrackControls.h"
+#include "tracks/ui/TrackView.h"
 
 HitTestPreview TrackPanelResizeHandle::HitPreview(bool bLinked)
 {
+   // TODO: more-than-two-channels-message
+
    static wxCursor resizeCursor{ wxCURSOR_SIZENS };
 
    /// When in the resize area we can adjust size or relative size.
@@ -36,13 +35,14 @@ HitTestPreview TrackPanelResizeHandle::HitPreview(bool bLinked)
       // is shorter when it is between stereo tracks).
 
       return {
-         _("Click and drag to adjust relative size of stereo tracks."),
+         XO(
+"Click and drag to adjust relative size of stereo tracks, double-click to make heights equal"),
          &resizeCursor
       };
    }
    else {
       return {
-         _("Click and drag to resize the track."),
+         XO("Click and drag to resize the track."),
          &resizeCursor
       };
    }
@@ -52,58 +52,78 @@ TrackPanelResizeHandle::~TrackPanelResizeHandle()
 {
 }
 
-UIHandle::Result TrackPanelResizeHandle::Click
-(const TrackPanelMouseEvent &WXUNUSED(evt), AudacityProject *WXUNUSED(pProject))
+UIHandle::Result TrackPanelResizeHandle::Click(
+   const TrackPanelMouseEvent &evt, AudacityProject *pProject )
 {
-   return RefreshCode::RefreshNone;
+   using namespace RefreshCode;
+   if ( evt.event.LeftDClick() && mMode == IsResizingBetweenLinkedTracks ) {
+      auto &tracks = TrackList::Get( *pProject );
+      auto pTrack = tracks.Lock(mpTrack);
+      if (pTrack &&
+          !TrackView::Get(*pTrack).GetMinimized()) {
+         auto range = TrackList::Channels( pTrack.get() );
+         auto size = range.size();
+         auto height = range.sum( [](const Track *pTrack){
+            return TrackView::Get(*pTrack).GetHeight(); } );
+         int ii = 1;
+         int coord = 0;
+         for ( const auto channel : range ) {
+            int newCoord = ((double)ii++ /size) * height;
+            TrackView::Get(*channel).SetHeight( newCoord - coord );
+            coord = newCoord;
+         }
+         ProjectHistory::Get( *pProject ).ModifyState(false);
+         // Do not start a drag
+         return Cancelled | RefreshAll;
+      }
+   }
+   return RefreshNone;
 }
 
 TrackPanelResizeHandle::TrackPanelResizeHandle
-( const std::shared_ptr<Track> &track, int y, const AudacityProject *pProject )
+( const std::shared_ptr<Track> &track, int y )
    : mpTrack{ track }
    , mMouseClickY( y )
 {
-   auto tracks = pProject->GetTracks();
-   Track *prev = tracks->GetPrev(track.get());
-   Track *next = tracks->GetNext(track.get());
+   // TODO: more-than-two-channels
 
    //STM:  Determine whether we should rescale one or two tracks
-   if (prev && prev->GetLink() == track.get()) {
-      // mpTrack is the lower track
-      mInitialTrackHeight = track->GetHeight();
-      mInitialActualHeight = track->GetActualHeight();
-      mInitialMinimized = track->GetMinimized();
-      mInitialUpperTrackHeight = prev->GetHeight();
-      mInitialUpperActualHeight = prev->GetActualHeight();
-      mMode = IsResizingBelowLinkedTracks;
+   auto channels = TrackList::Channels(track.get());
+   auto last = *channels.rbegin();
+   auto &lastView = TrackView::Get( *last );
+   mInitialTrackHeight = lastView.GetHeight();
+   mInitialActualHeight = lastView.GetActualHeight();
+   mInitialMinimized = lastView.GetMinimized();
+
+   if (channels.size() > 1) {
+      auto first = *channels.begin();
+      auto &firstView = TrackView::Get( *first );
+
+      mInitialUpperTrackHeight = firstView.GetHeight();
+      mInitialUpperActualHeight = firstView.GetActualHeight();
+
+      if (track.get() == *channels.rbegin())
+         // capturedTrack is the lowest track
+         mMode = IsResizingBelowLinkedTracks;
+      else
+         // capturedTrack is not the lowest track
+         mMode = IsResizingBetweenLinkedTracks;
    }
-   else if (next && track->GetLink() == next) {
-      // mpTrack is the upper track
-      mInitialTrackHeight = next->GetHeight();
-      mInitialActualHeight = next->GetActualHeight();
-      mInitialMinimized = next->GetMinimized();
-      mInitialUpperTrackHeight = track->GetHeight();
-      mInitialUpperActualHeight = track->GetActualHeight();
-      mMode = IsResizingBetweenLinkedTracks;
-   }
-   else {
-      // DM: Save the initial mouse location and the initial height
-      mInitialTrackHeight = track->GetHeight();
-      mInitialActualHeight = track->GetActualHeight();
-      mInitialMinimized = track->GetMinimized();
+   else
       mMode = IsResizing;
-   }
 }
 
 UIHandle::Result TrackPanelResizeHandle::Drag
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto &tracks = TrackList::Get( *pProject );
+   auto pTrack = tracks.Lock(mpTrack);
    if ( !pTrack )
       return RefreshCode::Cancelled;
 
+   auto &view = TrackView::Get( *pTrack );
+
    const wxMouseEvent &event = evt.event;
-   TrackList *const tracks = pProject->GetTracks();
 
    int delta = (event.m_y - mMouseClickY);
 
@@ -112,24 +132,30 @@ UIHandle::Result TrackPanelResizeHandle::Drag
    //
    // This used to be in HandleResizeClick(), but simply clicking
    // on a resize border would switch the minimized state.
-   if (pTrack->GetMinimized()) {
-      Track *link = pTrack->GetLink();
+   auto &data = TrackView::Get( *pTrack );
+   if (data.GetMinimized()) {
+      auto channels = TrackList::Channels( pTrack.get() );
+      for (auto channel : channels) {
+         auto &channelView = TrackView::Get( *channel );
+         channelView.SetHeight(channelView.GetHeight());
+         channelView.SetMinimized( false );
+      }
 
-      pTrack->SetHeight(pTrack->GetHeight());
-      pTrack->SetMinimized(false);
-
-      if (link) {
-         link->SetHeight(link->GetHeight());
-         link->SetMinimized(false);
+      if (channels.size() > 1) {
          // Initial values must be reset since they weren't based on the
          // minimized heights.
-         mInitialUpperTrackHeight = link->GetHeight();
-         mInitialTrackHeight = pTrack->GetHeight();
+         auto &channelView = TrackView::Get( **channels.begin() );
+         mInitialUpperTrackHeight = channelView.GetHeight();
+         mInitialTrackHeight = channelView.GetHeight();
       }
    }
 
    // Common pieces of code for MONO_WAVE_PAN and otherwise.
    auto doResizeBelow = [&] (Track *prev, bool WXUNUSED(vStereo)) {
+      // TODO: more-than-two-channels
+      
+      auto &prevView = TrackView::Get( *prev );
+
       double proportion = static_cast < double >(mInitialTrackHeight)
       / (mInitialTrackHeight + mInitialUpperTrackHeight);
 
@@ -140,40 +166,43 @@ UIHandle::Result TrackPanelResizeHandle::Drag
       (mInitialUpperTrackHeight + delta * (1.0 - proportion));
 
       //make sure neither track is smaller than its minimum height
-      if (newTrackHeight < pTrack->GetMinimizedHeight())
-         newTrackHeight = pTrack->GetMinimizedHeight();
-      if (newUpperTrackHeight < prev->GetMinimizedHeight())
-         newUpperTrackHeight = prev->GetMinimizedHeight();
+      if (newTrackHeight < view.GetMinimizedHeight())
+         newTrackHeight = view.GetMinimizedHeight();
+      if (newUpperTrackHeight < prevView.GetMinimizedHeight())
+         newUpperTrackHeight = prevView.GetMinimizedHeight();
 
-      pTrack->SetHeight(newTrackHeight);
-      prev->SetHeight(newUpperTrackHeight);
+      view.SetHeight(newTrackHeight);
+      prevView.SetHeight(newUpperTrackHeight);
    };
 
    auto doResizeBetween = [&] (Track *next, bool WXUNUSED(vStereo)) {
+      // TODO: more-than-two-channels
+
+      auto &nextView = TrackView::Get( *next );
       int newUpperTrackHeight = mInitialUpperTrackHeight + delta;
       int newTrackHeight = mInitialTrackHeight - delta;
 
       // make sure neither track is smaller than its minimum height
-      if (newTrackHeight < next->GetMinimizedHeight()) {
-         newTrackHeight = next->GetMinimizedHeight();
+      if (newTrackHeight < nextView.GetMinimizedHeight()) {
+         newTrackHeight = nextView.GetMinimizedHeight();
          newUpperTrackHeight =
-         mInitialUpperTrackHeight + mInitialTrackHeight - next->GetMinimizedHeight();
+         mInitialUpperTrackHeight + mInitialTrackHeight - nextView.GetMinimizedHeight();
       }
-      if (newUpperTrackHeight < pTrack->GetMinimizedHeight()) {
-         newUpperTrackHeight = pTrack->GetMinimizedHeight();
+      if (newUpperTrackHeight < view.GetMinimizedHeight()) {
+         newUpperTrackHeight = view.GetMinimizedHeight();
          newTrackHeight =
-         mInitialUpperTrackHeight + mInitialTrackHeight - pTrack->GetMinimizedHeight();
+         mInitialUpperTrackHeight + mInitialTrackHeight - view.GetMinimizedHeight();
       }
 
-      pTrack->SetHeight(newUpperTrackHeight);
-      next->SetHeight(newTrackHeight);
+      view.SetHeight(newUpperTrackHeight);
+      nextView.SetHeight(newTrackHeight);
    };
 
    auto doResize = [&] {
       int newTrackHeight = mInitialTrackHeight + delta;
-      if (newTrackHeight < pTrack->GetMinimizedHeight())
-         newTrackHeight = pTrack->GetMinimizedHeight();
-      pTrack->SetHeight(newTrackHeight);
+      if (newTrackHeight < view.GetMinimizedHeight())
+         newTrackHeight = view.GetMinimizedHeight();
+      view.SetHeight(newTrackHeight);
    };
 
    //STM: We may be dragging one or two (stereo) tracks.
@@ -184,13 +213,13 @@ UIHandle::Result TrackPanelResizeHandle::Drag
    {
       case IsResizingBelowLinkedTracks:
       {
-         Track *prev = tracks->GetPrev(pTrack.get());
+         auto prev = * -- tracks.Find(pTrack.get());
          doResizeBelow(prev, false);
          break;
       }
       case IsResizingBetweenLinkedTracks:
       {
-         Track *next = tracks->GetNext(pTrack.get());
+         auto next = * ++ tracks.Find(pTrack.get());
          doResizeBetween(next, false);
          break;
       }
@@ -208,7 +237,7 @@ UIHandle::Result TrackPanelResizeHandle::Drag
 }
 
 HitTestPreview TrackPanelResizeHandle::Preview
-(const TrackPanelMouseState &, const AudacityProject *)
+(const TrackPanelMouseState &, AudacityProject *)
 {
    return HitPreview(mMode == IsResizingBetweenLinkedTracks);
 }
@@ -223,41 +252,46 @@ UIHandle::Result TrackPanelResizeHandle::Release
    ///  We also modify the undo state (the action doesn't become
    ///  undo-able, but it gets merged with the previous undo-able
    ///  event).
-   pProject->ModifyState(false);
+   ProjectHistory::Get( *pProject ).ModifyState(false);
    return RefreshCode::FixScrollbars;
 }
 
 UIHandle::Result TrackPanelResizeHandle::Cancel(AudacityProject *pProject)
 {
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto &tracks = TrackList::Get( *pProject );
+   auto pTrack = tracks.Lock(mpTrack);
    if ( !pTrack )
       return RefreshCode::Cancelled;
 
-   TrackList *const tracks = pProject->GetTracks();
 
    switch (mMode) {
    case IsResizing:
    {
-      pTrack->SetHeight(mInitialActualHeight);
-      pTrack->SetMinimized(mInitialMinimized);
+      auto &view = TrackView::Get( *pTrack );
+      view.SetHeight(mInitialActualHeight);
+      view.SetMinimized( mInitialMinimized );
    }
    break;
    case IsResizingBetweenLinkedTracks:
    {
-      Track *const next = tracks->GetNext(pTrack.get());
-      pTrack->SetHeight(mInitialUpperActualHeight);
-      pTrack->SetMinimized(mInitialMinimized);
-      next->SetHeight(mInitialActualHeight);
-      next->SetMinimized(mInitialMinimized);
+      Track *const next = * ++ tracks.Find(pTrack.get());
+      auto
+         &view = TrackView::Get( *pTrack ), &nextView = TrackView::Get( *next );
+      view.SetHeight(mInitialUpperActualHeight);
+      view.SetMinimized( mInitialMinimized );
+      nextView.SetHeight(mInitialActualHeight);
+      nextView.SetMinimized( mInitialMinimized );
    }
    break;
    case IsResizingBelowLinkedTracks:
    {
-      Track *const prev = tracks->GetPrev(pTrack.get());
-      pTrack->SetHeight(mInitialActualHeight);
-      pTrack->SetMinimized(mInitialMinimized);
-      prev->SetHeight(mInitialUpperActualHeight);
-      prev->SetMinimized(mInitialMinimized);
+      Track *const prev = * -- tracks.Find(pTrack.get());
+      auto
+         &view = TrackView::Get( *pTrack ), &prevView = TrackView::Get( *prev );
+      view.SetHeight(mInitialActualHeight);
+      view.SetMinimized( mInitialMinimized );
+      prevView.SetHeight(mInitialUpperActualHeight);
+      prevView.SetMinimized(mInitialMinimized);
    }
    break;
    }

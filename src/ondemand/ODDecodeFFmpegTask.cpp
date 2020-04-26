@@ -9,16 +9,19 @@
 
 ******************************************************************/
 
-#include "../Audacity.h"   // needed before FFmpeg.h
+#include "../Audacity.h"   // needed before FFmpeg.h // for USE_* macros
+#include "../blockfile/ODDecodeBlockFile.h" // base class
+#include "ODDecodeFFmpegTask.h"
 
+#include "../Experimental.h"
+
+#include <wx/crt.h>
 #include <wx/wxprec.h>
 // For compilers that support precompilation, includes "wx/wx.h".
 #ifndef WX_PRECOMP
 // Include your minimal set of headers here, or wx.h
 #include <wx/window.h>
 #endif
-
-#include "../Experimental.h"
 
 #ifdef USE_FFMPEG
 #ifdef EXPERIMENTAL_OD_FFMPEG
@@ -27,11 +30,9 @@
 #include <functional>
 
 #include "../FFmpeg.h"      // which brings in avcodec.h, avformat.h
-#include "../import/ImportFFmpeg.h"
 
 
 extern FFmpegLibs *FFmpegLibsInst();
-#include "ODDecodeFFmpegTask.h"
 
 
 #define ODFFMPEG_SEEKING_TEST_UNKNOWN 0
@@ -79,10 +80,10 @@ public:
    ///However it doesn't do anything because ImportFFMpeg does all that for us.
    bool ReadHeader() override {return true;}
 
-   bool SeekingAllowed() ;
+   bool SeekingAllowed() override;
 
 private:
-   void InsertCache(movable_ptr<FFMpegDecodeCache> &&cache);
+   void InsertCache(std::unique_ptr<FFMpegDecodeCache> &&cache);
 
    //puts the actual audio samples into the blockfile's data array
    int FillDataFromCache(samplePtr & data, sampleFormat outFormat, sampleCount & start, size_t& len, unsigned int channel);
@@ -100,7 +101,7 @@ private:
    ScsPtr mScs;           //!< Pointer to array of pointers to stream contexts.
    ODDecodeFFmpegTask::Streams mChannels;
    std::shared_ptr<FFmpegContext> mContext; //!< Format description, also contains metadata and some useful info
-   std::vector<movable_ptr<FFMpegDecodeCache>> mDecodeCache;
+   std::vector<std::unique_ptr<FFMpegDecodeCache>> mDecodeCache;
    int                  mNumSamplesInCache;
    sampleCount                  mCurrentPos;     //the index of the next sample to be decoded
    size_t                       mCurrentLen;     //length of the last packet decoded
@@ -109,22 +110,15 @@ private:
    int                  mStreamIndex;
 };
 
-auto ODDecodeFFmpegTask::FromList(const std::list<TrackHolders> &channels) -> Streams
+auto ODDecodeFFmpegTask::FromList( const TrackHolders &channels ) -> Streams
 {
-   Streams streams;
-   streams.reserve(channels.size());
-   using namespace std;
-   transform(channels.begin(), channels.end(), back_inserter(streams),
-      [](const TrackHolders &holders) {
-         Channels channels;
-         channels.reserve(holders.size());
-         transform(holders.begin(), holders.end(), back_inserter(channels),
-            mem_fun_ref(&TrackHolders::value_type::get)
-         );
-         return channels;
+   // Convert array of array of unique_ptr to array of array of bare pointers
+   return transform_container<Streams>( channels,
+      [](const NewChannelGroup &holders) {
+         return transform_container<Channels>( holders,
+            std::mem_fn(&NewChannelGroup::value_type::get) );
       }
    );
-   return streams;
 }
 
 //------ ODDecodeFFmpegTask definitions
@@ -140,9 +134,9 @@ ODDecodeFFmpegTask::~ODDecodeFFmpegTask()
 }
 
 
-movable_ptr<ODTask> ODDecodeFFmpegTask::Clone() const
+std::unique_ptr<ODTask> ODDecodeFFmpegTask::Clone() const
 {
-   auto clone = make_movable<ODDecodeFFmpegTask>(mScs, Streams{ mChannels }, mContext, mStreamIndex);
+   auto clone = std::make_unique<ODDecodeFFmpegTask>(mScs, Streams{ mChannels }, mContext, mStreamIndex);
    clone->mDemandSample=GetDemandSample();
 
    //the decoders and blockfiles should not be copied.  They are created as the task runs.
@@ -157,7 +151,7 @@ ODFileDecoder* ODDecodeFFmpegTask::CreateFileDecoder(const wxString & fileName)
 {
    // Open the file for import
    auto decoder =
-      make_movable<ODFFmpegDecoder>(fileName, mScs, ODDecodeFFmpegTask::Streams{ mChannels },
+      std::make_unique<ODFFmpegDecoder>(fileName, mScs, ODDecodeFFmpegTask::Streams{ mChannels },
       mContext, mStreamIndex);
 
    mDecoders.push_back(std::move(decoder));
@@ -327,12 +321,11 @@ int ODFFmpegDecoder::Decode(SampleBuffer & data, sampleFormat & format, sampleCo
          mCurrentPos = start+len +1;
          while(numAttempts++ < kMaxSeekRewindAttempts && mCurrentPos > start) {
             //we want to move slightly before the start of the block file, but not too far ahead
-            targetts =
+            targetts = std::max( 0.0,
                (start - kDecodeSampleAllowance * numAttempts / kMaxSeekRewindAttempts)
                   .as_long_long() *
-               ((double)st->time_base.den/(st->time_base.num * st->codec->sample_rate ));
-            if(targetts<0)
-               targetts=0;
+               ((double)st->time_base.den/(st->time_base.num * st->codec->sample_rate ))
+            );
 
             //wxPrintf("attempting seek to %llu, attempts %d\n", targetts, numAttempts);
             if(av_seek_frame(mFormatContext,stindex,targetts,0) >= 0){
@@ -394,7 +387,7 @@ int ODFFmpegDecoder::Decode(SampleBuffer & data, sampleFormat & format, sampleCo
             // Is there a proof size_t will not overflow size_t?
             // Result is surely nonnegative.
             auto amt = (actualDecodeStart - start).as_size_t();
-            auto cache = make_movable<FFMpegDecodeCache>();
+            auto cache = std::make_unique<FFMpegDecodeCache>();
 
             //wxPrintf("skipping/zeroing %i samples. - now:%llu (%f), last:%llu, lastlen:%lu, start %llu, len %lu\n",amt,actualDecodeStart, actualDecodeStartdouble, mCurrentPos, mCurrentLen, start, len);
 
@@ -435,7 +428,7 @@ int ODFFmpegDecoder::Decode(SampleBuffer & data, sampleFormat & format, sampleCo
       for (int i = 0; i < mChannels.size(); i++)
       {
          sc = scs[i].get();
-         sc->m_pkt.create();
+         sc->m_pkt.emplace();
          if (DecodeFrame(sc, true) == 0)
          {
             sc->m_pkt.reset();
@@ -607,7 +600,7 @@ int ODFFmpegDecoder::DecodeFrame(streamContext *sc, bool flushing)
       //TODO- consider growing/unioning a few cache buffers like WaveCache does.
       //however we can't use wavecache as it isn't going to handle our stereo interleaved part, and isn't for samples
       //However if other ODDecode tasks need this, we should do a NEW class for caching.
-      auto cache = make_movable<FFMpegDecodeCache>();
+      auto cache = std::make_unique<FFMpegDecodeCache>();
       //len is number of samples per channel
       // wxASSERT(sc->m_stream->codec->channels > 0);
       cache->numChannels = std::max<unsigned>(0, sc->m_stream->codec->channels);
@@ -623,7 +616,7 @@ int ODFFmpegDecoder::DecodeFrame(streamContext *sc, bool flushing)
    return ret;
 }
 
-void ODFFmpegDecoder::InsertCache(movable_ptr<FFMpegDecodeCache> &&cache) {
+void ODFFmpegDecoder::InsertCache(std::unique_ptr<FFMpegDecodeCache> &&cache) {
    int searchStart = 0;
    int searchEnd = mDecodeCache.size(); //size() is also a valid insert index.
    int guess = 0;

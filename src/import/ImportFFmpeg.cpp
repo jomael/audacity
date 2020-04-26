@@ -20,29 +20,30 @@ Licensed under the GNU General Public License v2 or later
 
 *//*******************************************************************/
 
-#include "../Audacity.h"    // needed before FFmpeg.h
-#include "ImportFFmpeg.h"
+#include "../Audacity.h"    // needed before FFmpeg.h // for USE_* macros
+
+#include "../Experimental.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
 
 #include "../FFmpeg.h"      // which brings in avcodec.h, avformat.h
+#include "../WaveClip.h"
+#include "../blockfile/ODDecodeBlockFile.h"
 #include "../ondemand/ODManager.h"
 #ifndef WX_PRECOMP
 // Include your minimal set of headers here, or wx.h
 #include <wx/window.h>
 #endif
 
-#include "../Experimental.h"
-#include "../MemoryX.h"
+#include "../widgets/ProgressDialog.h"
 
 
-#define DESC _("FFmpeg-compatible files")
+#define DESC XO("FFmpeg-compatible files")
 
 //TODO: remove non-audio extensions
 #if defined(USE_FFMPEG)
-static const wxChar *exts[] =
-{
+static const auto exts = {
    wxT("4xm"),
    wxT("MTV"),
    wxT("roq"),
@@ -154,7 +155,6 @@ static const wxChar *exts[] =
 // all the includes live here by default
 #include "Import.h"
 #include "../Tags.h"
-#include "../Internat.h"
 #include "../WaveTrack.h"
 #include "ImportPlugin.h"
 
@@ -173,26 +173,26 @@ class FFmpegImportPlugin final : public ImportPlugin
 {
 public:
    FFmpegImportPlugin():
-      ImportPlugin(wxArrayString(WXSIZEOF(exts),exts))
-      {
-
-      }
+      ImportPlugin( FileExtensions( exts.begin(), exts.end() ) )
+   {
+   }
 
    ~FFmpegImportPlugin() { }
 
-   wxString GetPluginStringID() { return wxT("libav"); }
-   wxString GetPluginFormatDescription();
+   wxString GetPluginStringID() override { return wxT("libav"); }
+   TranslatableString GetPluginFormatDescription() override;
 
    ///! Probes the file and opens it if appropriate
-   std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
+   std::unique_ptr<ImportFileHandle> Open(
+      const FilePath &Filename, AudacityProject*) override;
 };
 
-///! Does acual import, returned by FFmpegImportPlugin::Open
+///! Does actual import, returned by FFmpegImportPlugin::Open
 class FFmpegImportFileHandle final : public ImportFileHandle
 {
 
 public:
-   FFmpegImportFileHandle(const wxString & name);
+   FFmpegImportFileHandle(const FilePath & name);
    ~FFmpegImportFileHandle();
 
    ///! Format initialization
@@ -203,7 +203,7 @@ public:
    bool InitCodecs();
 
 
-   wxString GetFileDescription() override;
+   TranslatableString GetFileDescription() override;
    ByteCount GetFileUncompressedBytes() override;
 
    ///! Imports audio
@@ -246,7 +246,7 @@ public:
 
    ///! Called by Import.cpp
    ///\return array of strings - descriptions of the streams
-   const wxArrayString &GetStreamInfo() override
+   const TranslatableStrings &GetStreamInfo() override
    {
       return mStreamInfo;
    }
@@ -266,15 +266,18 @@ private:
    AVFormatContext      *mFormatContext; //!< Format description, also contains metadata and some useful info
    int                   mNumStreams;    //!< mNumstreams is less or equal to mFormatContext->nb_streams
    ScsPtr                mScs;           //!< Points to array of pointers to stream contexts, which may be shared with a decoder task.
-   wxArrayString         mStreamInfo;    //!< Array of stream descriptions. Length is mNumStreams
+   TranslatableStrings   mStreamInfo;    //!< Array of stream descriptions. Length is mNumStreams
 
    wxInt64               mProgressPos;   //!< Current timestamp, file position or whatever is used as first argument for Update()
    wxInt64               mProgressLen;   //!< Duration, total length or whatever is used as second argument for Update()
 
    bool                  mCancelled;     //!< True if importing was canceled by user
    bool                  mStopped;       //!< True if importing was stopped by user
-   wxString              mName;
-   std::list<TrackHolders> mChannels;     //!< 2-dimentional array of WaveTrack's. First dimention - streams, second - channels of a stream. Length is mNumStreams
+   FilePath              mName;
+   TrackHolders mChannels;               //!< 2-dimensional array of WaveTrack's.
+                                         //!< First dimension - streams,
+                                         //!< second - channels of a stream.
+                                         //!< Length is mNumStreams
 #ifdef EXPERIMENTAL_OD_FFMPEG
    bool                  mUsingOD;
 #endif
@@ -282,19 +285,13 @@ private:
 };
 
 
-void GetFFmpegImportPlugin(ImportPluginList &importPluginList,
-                           UnusableImportPluginList &WXUNUSED(unusableImportPluginList))
-{
-   importPluginList.push_back( make_movable<FFmpegImportPlugin>() );
-}
-
-
-wxString FFmpegImportPlugin::GetPluginFormatDescription()
+TranslatableString FFmpegImportPlugin::GetPluginFormatDescription()
 {
    return DESC;
 }
 
-std::unique_ptr<ImportFileHandle> FFmpegImportPlugin::Open(const wxString &filename)
+std::unique_ptr<ImportFileHandle> FFmpegImportPlugin::Open(
+   const FilePath &filename, AudacityProject*)
 {
    auto handle = std::make_unique<FFmpegImportFileHandle>(filename);
 
@@ -336,8 +333,12 @@ std::unique_ptr<ImportFileHandle> FFmpegImportPlugin::Open(const wxString &filen
    return std::move(handle);
 }
 
+static Importer::RegisteredImportPlugin registered{ "FFmpeg",
+   std::make_unique< FFmpegImportPlugin >()
+};
 
-FFmpegImportFileHandle::FFmpegImportFileHandle(const wxString & name)
+
+FFmpegImportFileHandle::FFmpegImportFileHandle(const FilePath & name)
 :  ImportFileHandle(name)
 {
    PickFFmpegLibs();
@@ -429,14 +430,13 @@ bool FFmpegImportFileHandle::InitCodecs()
             continue;
          }
 
-         // Stream is decodeable and it is audio. Add it and its decription to the arrays
-         wxString strinfo;
+         // Stream is decodeable and it is audio. Add it and its description to the arrays
          int duration = 0;
          if (sc->m_stream->duration > 0)
             duration = sc->m_stream->duration * sc->m_stream->time_base.num / sc->m_stream->time_base.den;
          else
             duration = mFormatContext->duration / AV_TIME_BASE;
-         wxString bitrate = wxT("");
+         wxString bitrate;
          if (sc->m_codecCtx->bit_rate > 0)
             bitrate.Printf(wxT("%d"),(int)sc->m_codecCtx->bit_rate);
          else
@@ -448,18 +448,26 @@ bool FFmpegImportFileHandle::InitCodecs()
          {
             lang.FromUTF8(tag->value);
          }
-         strinfo.Printf(_("Index[%02x] Codec[%s], Language[%s], Bitrate[%s], Channels[%d], Duration[%d]"),
-                        sc->m_stream->id,codec->name,lang,bitrate,(int)sc->m_stream->codec->channels,(int)duration);
-         mStreamInfo.Add(strinfo);
+         auto strinfo = XO(
+/* i18n-hint: "codec" is short for a "coder-decoder" algorithm */
+"Index[%02x] Codec[%s], Language[%s], Bitrate[%s], Channels[%d], Duration[%d]")
+            .Format(
+               sc->m_stream->id,
+               codec->name,
+               lang,
+               bitrate,
+               (int)sc->m_stream->codec->channels,
+               (int)duration);
+         mStreamInfo.push_back(strinfo);
          mScs->get()[mNumStreams++] = std::move(sc);
       }
       //for video and unknown streams do nothing
    }
-   //It doesn't really returns false, but GetStreamCount() will return 0 if file is composed entierly of unreadable streams
+   //It doesn't really returns false, but GetStreamCount() will return 0 if file is composed entirely of unreadable streams
    return true;
 }
 
-wxString FFmpegImportFileHandle::GetFileDescription()
+TranslatableString FFmpegImportFileHandle::GetFileDescription()
 {
    return DESC;
 }
@@ -520,31 +528,8 @@ ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
       // There is a possibility that number of channels will change over time, but we do not have WaveTracks for NEW channels. Remember the number of channels and stick to it.
       sc->m_initialchannels = sc->m_stream->codec->channels;
       stream.resize(sc->m_stream->codec->channels);
-      int c = -1;
       for (auto &channel : stream)
-      {
-         ++c;
-
          channel = trackFactory->NewWaveTrack(sc->m_osamplefmt, sc->m_stream->codec->sample_rate);
-
-         if (sc->m_stream->codec->channels == 2)
-         {
-            switch (c)
-            {
-            case 0:
-               channel->SetChannel(Track::LeftChannel);
-               channel->SetLinked(true);
-               break;
-            case 1:
-               channel->SetChannel(Track::RightChannel);
-               break;
-            }
-         }
-         else
-         {
-            channel->SetChannel(Track::MonoChannel);
-         }
-      }
    }
 
    // Handles the start_time by creating silence. This may or may not be correct.
@@ -575,7 +560,7 @@ ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
       }
    }
    // This is the heart of the importing process
-   // The result of Import() to be returend. It will be something other than zero if user canceled or some error appears.
+   // The result of Import() to be returned. It will be something other than zero if user canceled or some error appears.
    auto res = ProgressResult::Success;
 
 #ifdef EXPERIMENTAL_OD_FFMPEG
@@ -584,13 +569,13 @@ ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
    //at this point we know the file is good and that we have to load the number of channels in mScs[s]->m_stream->codec->channels;
    //so for OD loading we create the tracks and releasee the modal lock after starting the ODTask.
    if (mUsingOD) {
-      std::vector<movable_ptr<ODDecodeFFmpegTask>> tasks;
+      std::vector<std::unique_ptr<ODDecodeFFmpegTask>> tasks;
       //append blockfiles to each stream and add an individual ODDecodeTask for each one.
       s = -1;
       for (const auto &stream : mChannels) {
          ++s;
          auto odTask =
-            make_movable<ODDecodeFFmpegTask>(mScs, ODDecodeFFmpegTask::FromList(mChannels), mContext, s);
+            std::make_unique<ODDecodeFFmpegTask>(mScs, ODDecodeFFmpegTask::FromList(mChannels), mContext, s);
          odTask->CreateFileDecoder(mFilename);
 
          //each stream has different duration.  We need to know it if seeking is to be allowed.
@@ -605,7 +590,7 @@ ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
 
          //for each wavetrack within the stream add coded blockfiles
          for (int c = 0; c < sc->m_stream->codec->channels; c++) {
-            WaveTrack *t = stream[c].get();
+            auto t = stream[c];
             odTask->AddWaveTrack(t);
 
             auto maxBlockSize = t->GetMaxBlockSize();
@@ -615,7 +600,14 @@ ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
                const auto blockLen =
                   limitSampleBufferSize( maxBlockSize, sampleDuration - i );
 
-               t->AppendCoded(mFilename, i, blockLen, c, ODTask::eODFFMPEG);
+               t->RightmostOrNewClip()->AppendBlockFile(
+                  [&]( wxFileNameWrapper filePath, size_t len ) {
+                     return make_blockfile<ODDecodeBlockFile>(
+                        std::move(filePath), wxFileNameWrapper{ mFilename },
+                        i, len, c, ODTask::eODFFMPEG);
+                  },
+                  blockLen
+               );
 
                // This only works well for single streams since we assume
                // each stream is of the same duration and channels
@@ -668,7 +660,7 @@ ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
       for (int i = 0; i < mNumStreams; i++)
       {
          auto sc = scs[i].get();
-         sc->m_pkt.create();
+         sc->m_pkt.emplace();
          if (DecodeFrame(sc, true) == 0)
          {
             WriteData(sc);
@@ -688,13 +680,10 @@ ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
 
    // Copy audio from mChannels to newly created tracks (destroying mChannels elements in process)
    for (auto &stream : mChannels)
-   {
       for(auto &channel : stream)
-      {
          channel->Flush();
-         outTracks.push_back(std::move(channel));
-      }
-   }
+
+   outTracks.swap(mChannels);
 
    // Save metadata
    WriteMetadata(tags);

@@ -15,6 +15,7 @@
 
 #include "../Audacity.h"
 #include "Noise.h"
+#include "LoadEffects.h"
 
 #include <math.h>
 
@@ -24,8 +25,10 @@
 #include <wx/valgen.h>
 
 #include "../Prefs.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../widgets/valnum.h"
+#include "../widgets/NumericTextCtrl.h"
 
 enum kTypes
 {
@@ -35,7 +38,7 @@ enum kTypes
    nTypes
 };
 
-static const IdentInterfaceSymbol kTypeStrings[nTypes] =
+static const EnumValueSymbol kTypeStrings[nTypes] =
 {
    // These are acceptable dual purpose internal/visible names
    { XO("White") },
@@ -53,6 +56,11 @@ Param( Amp,    double,  wxT("Amplitude"),  0.8,     0.0,  1.0,           1  );
 // EffectNoise
 //
 
+const ComponentInterfaceSymbol EffectNoise::Symbol
+{ XO("Noise") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectNoise > reg; }
+
 EffectNoise::EffectNoise()
 {
    mType = DEF_Type;
@@ -67,16 +75,16 @@ EffectNoise::~EffectNoise()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectNoise::GetSymbol()
+ComponentInterfaceSymbol EffectNoise::GetSymbol()
 {
-   return NOISE_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectNoise::GetDescription()
+TranslatableString EffectNoise::GetDescription()
 {
-   return _("Generates one of three different types of noise");
+   return XO("Generates one of three different types of noise");
 }
 
 wxString EffectNoise::ManualPage()
@@ -223,14 +231,15 @@ void EffectNoise::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxCENTER);
    {
-      auto typeChoices = LocalizedStrings(kTypeStrings, nTypes);
-      S.AddChoice(_("Noise type:"), wxT(""), &typeChoices)->SetValidator(wxGenericValidator(&mType));
+      S.Validator<wxGenericValidator>(&mType)
+         .AddChoice(XO("&Noise type:"), Msgids(kTypeStrings, nTypes));
 
-      FloatingPointValidator<double> vldAmp(6, &mAmp, NumValidatorStyle::NO_TRAILING_ZEROES);
-      vldAmp.SetRange(MIN_Amp, MAX_Amp);
-      S.AddTextBox(_("Amplitude (0-1):"), wxT(""), 12)->SetValidator(vldAmp);
+      S.Validator<FloatingPointValidator<double>>(
+            6, &mAmp, NumValidatorStyle::NO_TRAILING_ZEROES, MIN_Amp, MAX_Amp
+         )
+         .AddTextBox(XO("&Amplitude (0-1):"), wxT(""), 12);
 
-      S.AddPrompt(_("Duration:"));
+      S.AddPrompt(XO("&Duration:"));
       mNoiseDurationT = safenew
          NumericTextCtrl(S.GetParent(), wxID_ANY,
                          NumericConverter::TIME,
@@ -239,8 +248,9 @@ void EffectNoise::PopulateOrExchange(ShuttleGui & S)
                          mProjectRate,
                          NumericTextCtrl::Options{}
                             .AutoPos(true));
-      mNoiseDurationT->SetName(_("Duration"));
-      S.AddWindow(mNoiseDurationT, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL | wxALL);
+      S.Name(XO("Duration"))
+         .Position(wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL | wxALL)
+         .AddWindow(mNoiseDurationT);
    }
    S.EndMultiColumn();
 }

@@ -24,17 +24,15 @@
 // WARNING:  This is NOT 64-bit safe
 // *******************************************************************
 
-#include "../../Audacity.h"
+#include "../../Audacity.h" // for USE_* macros
+#include "VSTEffect.h"
 
 #if 0
 #if defined(BUILDING_AUDACITY)
-#include "../../Audacity.h"
 #include "../../PlatformCompatibility.h"
 
 // Make the main function private
-#define MODULEMAIN_SCOPE static
 #else
-#define MODULEMAIN_SCOPE
 #define USE_VST 1
 #endif
 #endif
@@ -44,6 +42,7 @@
 #include <limits.h>
 #include <stdio.h>
 
+#include <wx/setup.h> // for wxUSE_* macros
 #include <wx/dynlib.h>
 #include <wx/app.h>
 #include <wx/defs.h>
@@ -54,7 +53,6 @@
 #include <wx/dcclient.h>
 #include <wx/file.h>
 #include <wx/filename.h>
-#include <wx/frame.h>
 #include <wx/imaglist.h>
 #include <wx/listctrl.h>
 #include <wx/log.h>
@@ -83,16 +81,13 @@
 //        dialogs, widgets and other stuff.  This will need to be cleaned up.
 
 #include "../../FileNames.h"
-#include "../../Internat.h"
 #include "../../PlatformCompatibility.h"
 #include "../../ShuttleGui.h"
 #include "../../effects/Effect.h"
-#include "../../widgets/NumericTextCtrl.h"
-#include "../../widgets/wxPanelWrapper.h"
 #include "../../widgets/valnum.h"
-#include "../../widgets/ErrorDialog.h"
+#include "../../widgets/AudacityMessageBox.h"
+#include "../../widgets/NumericTextCtrl.h"
 #include "../../xml/XMLFileReader.h"
-#include "../../xml/XMLWriter.h"
 
 #if wxUSE_ACCESSIBILITY
 #include "../../widgets/WindowAccessible.h"
@@ -100,9 +95,17 @@
 
 #include "audacity/ConfigInterface.h"
 
-#include "VSTEffect.h"
-#include "../../MemoryX.h"
 #include <cstring>
+
+// Put this inclusion last.  On Linux it makes some unfortunate pollution of
+// preprocessor macro name space that interferes with other headers.
+#if defined(__WXOSX__)
+#include "VSTControlOSX.h"
+#elif defined(__WXMSW__)
+#include "VSTControlMSW.h"
+#elif defined(__WXGTK__)
+#include "VSTControlGTK.h"
+#endif
 
 static float reinterpretAsFloat(uint32_t x)
 {
@@ -168,7 +171,7 @@ public:
       if (wxTheApp && wxTheApp->argc == 3 && wxStrcmp(wxTheApp->argv[1], VSTCMDKEY) == 0)
       {
          // NOTE:  This can really hide failures, which is what we want for those pesky
-         //        VSTs that are bad or that our support isn't currect.  But, it can also
+         //        VSTs that are bad or that our support isn't correct.  But, it can also
          //        hide Audacity failures in the subprocess, so if you're having an unruley
          //        VST or odd Audacity failures, comment it out and you might get more info.
          //wxHandleFatalExceptions();
@@ -226,17 +229,17 @@ public:
 
    // EffectClientInterface implementation
 
-   wxString GetPath() override
+   PluginPath GetPath() override
    {
       return mPath;
    }
 
-   IdentInterfaceSymbol GetSymbol() override
+   ComponentInterfaceSymbol GetSymbol() override
    {
       return mName;
    }
 
-   IdentInterfaceSymbol GetVendor() override
+   VendorSymbol GetVendor() override
    {
       return { mVendor };
    }
@@ -246,12 +249,12 @@ public:
       return mVersion;
    }
 
-   wxString GetDescription() override
+   TranslatableString GetDescription() override
    {
       return mDescription;
    }
 
-   IdentInterfaceSymbol GetFamilyId() override
+   EffectFamilySymbol GetFamily() override
    {
       return VSTPLUGINTYPE;
    }
@@ -291,7 +294,7 @@ public:
    wxString mName;
    wxString mVendor;
    wxString mVersion;
-   wxString mDescription;
+   TranslatableString mDescription;
    EffectType mType;
    bool mInteractive;
    bool mAutomatable;
@@ -318,20 +321,20 @@ VSTEffectsModule::~VSTEffectsModule()
 }
 
 // ============================================================================
-// IdentInterface implementation
+// ComponentInterface implementation
 // ============================================================================
 
-wxString VSTEffectsModule::GetPath()
+PluginPath VSTEffectsModule::GetPath()
 {
    return mPath;
 }
 
-IdentInterfaceSymbol VSTEffectsModule::GetSymbol()
+ComponentInterfaceSymbol VSTEffectsModule::GetSymbol()
 {
    return XO("VST Effects");
 }
 
-IdentInterfaceSymbol VSTEffectsModule::GetVendor()
+VendorSymbol VSTEffectsModule::GetVendor()
 {
    return XO("The Audacity Team");
 }
@@ -342,9 +345,9 @@ wxString VSTEffectsModule::GetVersion()
    return AUDACITY_VERSION_STRING;
 }
 
-wxString VSTEffectsModule::GetDescription()
+TranslatableString VSTEffectsModule::GetDescription()
 {
-   return _("Adds the ability to use VST effects in Audacity.");
+   return XO("Adds the ability to use VST effects in Audacity.");
 }
 
 // ============================================================================
@@ -363,14 +366,22 @@ void VSTEffectsModule::Terminate()
    return;
 }
 
-wxArrayString VSTEffectsModule::FileExtensions()
+EffectFamilySymbol VSTEffectsModule::GetOptionalFamilySymbol()
 {
-   static const wxString ext[] = { _T("vst") };
-   static const wxArrayString result{ sizeof(ext)/sizeof(*ext), ext };
+#if USE_VST
+   return VSTPLUGINTYPE;
+#else
+   return {};
+#endif
+}
+
+const FileExtensions &VSTEffectsModule::GetFileExtensions()
+{
+   static FileExtensions result{{ _T("vst") }};
    return result;
 }
 
-wxString VSTEffectsModule::InstallPath()
+FilePath VSTEffectsModule::InstallPath()
 {
    // Not yet ready for VST drag-and-drop...
    // return FileNames::PlugInDir();
@@ -384,10 +395,10 @@ bool VSTEffectsModule::AutoRegisterPlugins(PluginManagerInterface & WXUNUSED(pm)
    return true;
 }
 
-wxArrayString VSTEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
+PluginPaths VSTEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
 {
-   wxArrayString pathList;
-   wxArrayString files;
+   FilePaths pathList;
+   FilePaths files;
 
    // Check for the VST_PATH environment variable
    wxString vstpath = wxString::FromUTF8(getenv("VST_PATH"));
@@ -396,7 +407,7 @@ wxArrayString VSTEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
       wxStringTokenizer tok(vstpath);
       while (tok.HasMoreTokens())
       {
-         pathList.Add(tok.GetNextToken());
+         pathList.push_back(tok.GetNextToken());
       }
    }
 
@@ -404,20 +415,20 @@ wxArrayString VSTEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
 #define VSTPATH wxT("/Library/Audio/Plug-Ins/VST")
 
    // Look in ~/Library/Audio/Plug-Ins/VST and /Library/Audio/Plug-Ins/VST
-   pathList.Add(wxGetHomeDir() + wxFILE_SEP_PATH + VSTPATH);
-   pathList.Add(VSTPATH);
+   pathList.push_back(wxGetHomeDir() + wxFILE_SEP_PATH + VSTPATH);
+   pathList.push_back(VSTPATH);
 
    // Recursively search all paths for Info.plist files.  This will identify all
    // bundles.
    pm.FindFilesInPathList(wxT("Info.plist"), pathList, files, true);
 
    // Remove the 'Contents/Info.plist' portion of the names
-   for (size_t i = 0; i < files.GetCount(); i++)
+   for (size_t i = 0; i < files.size(); i++)
    {
       files[i] = wxPathOnly(wxPathOnly(files[i]));
       if (!files[i].EndsWith(wxT(".vst")))
       {
-         files.RemoveAt(i--);
+         files.erase( files.begin() + i-- );
       }
    }
 
@@ -441,7 +452,7 @@ wxArrayString VSTEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
       tpath[len] = 0;
       dpath[0] = 0;
       ExpandEnvironmentStrings(tpath, dpath, WXSIZEOF(dpath));
-      pathList.Add(dpath);
+      pathList.push_back(dpath);
    }
 
    // Then try HKEY_LOCAL_MACHINE registry key
@@ -458,7 +469,7 @@ wxArrayString VSTEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
       tpath[len] = 0;
       dpath[0] = 0;
       ExpandEnvironmentStrings(tpath, dpath, WXSIZEOF(dpath));
-      pathList.Add(dpath);
+      pathList.push_back(dpath);
    }
 
    // Add the default path last
@@ -466,7 +477,7 @@ wxArrayString VSTEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
    ExpandEnvironmentStrings(wxT("%ProgramFiles%\\Steinberg\\VSTPlugins"),
                             dpath,
                             WXSIZEOF(dpath));
-   pathList.Add(dpath);
+   pathList.push_back(dpath);
 
    // Recursively scan for all DLLs
    pm.FindFilesInPathList(wxT("*.dll"), pathList, files, true);
@@ -474,15 +485,15 @@ wxArrayString VSTEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
 #else
 
    // Nothing specified in the VST_PATH environment variable...provide defaults
-   if (vstpath.IsEmpty())
+   if (vstpath.empty())
    {
       // We add this "non-default" one
-      pathList.Add(wxT(LIBDIR) wxT("/vst"));
+      pathList.push_back(wxT(LIBDIR) wxT("/vst"));
 
       // These are the defaults used by other hosts
-      pathList.Add(wxT("/usr/lib/vst"));
-      pathList.Add(wxT("/usr/local/lib/vst"));
-      pathList.Add(wxGetHomeDir() + wxFILE_SEP_PATH + wxT(".vst"));
+      pathList.push_back(wxT("/usr/lib/vst"));
+      pathList.push_back(wxT("/usr/local/lib/vst"));
+      pathList.push_back(wxGetHomeDir() + wxFILE_SEP_PATH + wxT(".vst"));
    }
 
    // Recursively scan for all shared objects
@@ -490,23 +501,23 @@ wxArrayString VSTEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
 
 #endif
 
-   return files;
+   return { files.begin(), files.end() };
 }
 
 unsigned VSTEffectsModule::DiscoverPluginsAtPath(
-   const wxString & path, wxString &errMsg,
+   const PluginPath & path, TranslatableString &errMsg,
    const RegistrationCallback &callback)
 {
    bool error = false;
    unsigned nFound = 0;
-   errMsg.clear();
+   errMsg = {};
    // TODO:  Fix this for external usage
-   const wxString &cmdpath = PlatformCompatibility::GetExecutablePath();
+   const auto &cmdpath = PlatformCompatibility::GetExecutablePath();
 
    wxString effectIDs = wxT("0;");
    wxStringTokenizer effectTzr(effectIDs, wxT(";"));
 
-   Maybe<wxProgressDialog> progress{};
+   Optional<wxProgressDialog> progress{};
    size_t idCnt = 0;
    size_t idNdx = 0;
 
@@ -566,7 +577,7 @@ unsigned VSTEffectsModule::DiscoverPluginsAtPath(
                idCnt = effectTzr.CountTokens();
                if (idCnt > 3)
                {
-                  progress.create( _("Scanning Shell VST"),
+                  progress.emplace( _("Scanning Shell VST"),
                         wxString::Format(_("Registering %d of %d: %-64.64s"), 0, idCnt,
                                          proc.GetSymbol().Translation()),
                         static_cast<int>(idCnt),
@@ -607,7 +618,7 @@ unsigned VSTEffectsModule::DiscoverPluginsAtPath(
             break;
 
             case kKeyDescription:
-               proc.mDescription = val;
+               proc.mDescription = Verbatim( val );
                keycount++;
             break;
 
@@ -619,12 +630,12 @@ unsigned VSTEffectsModule::DiscoverPluginsAtPath(
             break;
 
             case kKeyInteractive:
-               proc.mInteractive = val.IsSameAs(wxT("1"));
+               proc.mInteractive = val == wxT("1");
                keycount++;
             break;
 
             case kKeyAutomatable:
-               proc.mAutomatable = val.IsSameAs(wxT("1"));
+               proc.mAutomatable = val == wxT("1");
                keycount++;
             break;
 
@@ -664,12 +675,12 @@ unsigned VSTEffectsModule::DiscoverPluginsAtPath(
    }
 
    if (error)
-      errMsg = _("Could not load the library");
+      errMsg = XO("Could not load the library");
 
    return nFound;
 }
 
-bool VSTEffectsModule::IsPluginValid(const wxString & path, bool bFast)
+bool VSTEffectsModule::IsPluginValid(const PluginPath & path, bool bFast)
 {
    if( bFast )
       return true;
@@ -677,7 +688,7 @@ bool VSTEffectsModule::IsPluginValid(const wxString & path, bool bFast)
    return wxFileName::FileExists(realPath) || wxFileName::DirExists(realPath);
 }
 
-IdentInterface *VSTEffectsModule::CreateInstance(const wxString & path)
+ComponentInterface *VSTEffectsModule::CreateInstance(const PluginPath & path)
 {
    // Acquires a resource for the application.
    // For us, the ID is simply the path to the effect
@@ -685,7 +696,7 @@ IdentInterface *VSTEffectsModule::CreateInstance(const wxString & path)
    return safenew VSTEffect(path);
 }
 
-void VSTEffectsModule::DeleteInstance(IdentInterface *instance)
+void VSTEffectsModule::DeleteInstance(ComponentInterface *instance)
 {
    std::unique_ptr < VSTEffect > {
       dynamic_cast<VSTEffect *>(instance)
@@ -730,7 +741,7 @@ void VSTEffectsModule::Check(const wxChar *path)
          out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyVendor,
                                  effect.GetVendor().Internal());
          out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyVersion, effect.GetVersion());
-         out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyDescription, effect.GetDescription());
+         out += wxString::Format(wxT("%s%d=%s\n"), OUTPUTKEY, kKeyDescription, effect.GetDescription().Translation());
          out += wxString::Format(wxT("%s%d=%d\n"), OUTPUTKEY, kKeyEffectType, effect.GetType());
          out += wxString::Format(wxT("%s%d=%d\n"), OUTPUTKEY, kKeyInteractive, effect.IsInteractive());
          out += wxString::Format(wxT("%s%d=%d\n"), OUTPUTKEY, kKeyAutomatable, effect.SupportsAutomation());
@@ -775,7 +786,7 @@ BEGIN_EVENT_TABLE(VSTEffectOptionsDialog, wxDialogWrapper)
 END_EVENT_TABLE()
 
 VSTEffectOptionsDialog::VSTEffectOptionsDialog(wxWindow * parent, EffectHostInterface *host)
-:  wxDialogWrapper(parent, wxID_ANY, wxString(_("VST Effect Options")))
+:  wxDialogWrapper(parent, wxID_ANY, XO("VST Effect Options"))
 {
    mHost = host;
 
@@ -798,56 +809,57 @@ void VSTEffectOptionsDialog::PopulateOrExchange(ShuttleGui & S)
    {
       S.StartVerticalLay(false);
       {
-         S.StartStatic(_("Buffer Size"));
+         S.StartStatic(XO("Buffer Size"));
          {
-            IntegerValidator<int> vld(&mBufferSize);
-            vld.SetRange(8, 1048576 * 1);
-
-            S.AddVariableText(wxString() +
-               _("The buffer size controls the number of samples sent to the effect ") +
-               _("on each iteration. Smaller values will cause slower processing and ") +
-               _("some effects require 8192 samples or less to work properly. However ") +
-               _("most effects can accept large buffers and using them will greatly ") +
-               _("reduce processing time."))->Wrap(650);
+            S.AddVariableText( XO(
+"The buffer size controls the number of samples sent to the effect "
+"on each iteration. Smaller values will cause slower processing and "
+"some effects require 8192 samples or less to work properly. However "
+"most effects can accept large buffers and using them will greatly "
+"reduce processing time."),
+               false, 0, 650);
 
             S.StartHorizontalLay(wxALIGN_LEFT);
             {
                wxTextCtrl *t;
-               t = S.TieNumericTextBox(_("&Buffer Size (8 to 1048576 samples):"),
+               t = S.Validator<IntegerValidator<int>>(
+                     &mBufferSize, NumValidatorStyle::DEFAULT, 8, 1048576 * 1)
+                  .MinSize( { 100, -1 } )
+                  .TieNumericTextBox(XO("&Buffer Size (8 to 1048576 samples):"),
                                        mBufferSize,
                                        12);
-               t->SetMinSize(wxSize(100, -1));
-               t->SetValidator(vld);
             }
             S.EndHorizontalLay();
          }
          S.EndStatic();
 
-         S.StartStatic(_("Latency Compensation"));
+         S.StartStatic(XO("Latency Compensation"));
          {
-            S.AddVariableText(wxString() +
-               _("As part of their processing, some VST effects must delay returning ") +
-               _("audio to Audacity. When not compensating for this delay, you will ") +
-               _("notice that small silences have been inserted into the audio. ") +
-               _("Enabling this option will provide that compensation, but it may ") +
-               _("not work for all VST effects."))->Wrap(650);
+            S.AddVariableText( XO(
+"As part of their processing, some VST effects must delay returning "
+"audio to Audacity. When not compensating for this delay, you will "
+"notice that small silences have been inserted into the audio. "
+"Enabling this option will provide that compensation, but it may "
+"not work for all VST effects."),
+               false, 0, 650);
 
             S.StartHorizontalLay(wxALIGN_LEFT);
             {
-               S.TieCheckBox(_("Enable &compensation"),
+               S.TieCheckBox(XO("Enable &compensation"),
                              mUseLatency);
             }
             S.EndHorizontalLay();
          }
          S.EndStatic();
 
-         S.StartStatic(_("Graphical Mode"));
+         S.StartStatic(XO("Graphical Mode"));
          {
-            S.AddVariableText(wxString() +
-               _("Most VST effects have a graphical interface for setting parameter values.") +
-               _(" A basic text-only method is also available. ") +
-               _(" Reopen the effect for this to take effect."))->Wrap(650);
-            S.TieCheckBox(_("Enable &graphical interface"),
+            S.AddVariableText( XO(
+"Most VST effects have a graphical interface for setting parameter values."
+" A basic text-only method is also available. "
+" Reopen the effect for this to take effect."),
+               false, 0, 650);
+            S.TieCheckBox(XO("Enable &graphical interface"),
                           mUseGUI);
          }
          S.EndStatic();
@@ -1114,16 +1126,16 @@ void VSTEffect::BundleDeleter::operator() (void* p) const
       CFRelease(static_cast<CFBundleRef>(p));
 }
 
-void VSTEffect::ResourceDeleter::operator() (void *p) const
+void VSTEffect::ResourceHandle::reset()
 {
-   if (mpHandle) {
-      int resource = (int)p;
-      CFBundleCloseBundleResourceMap(mpHandle->get(), resource);
-   }
+   if (mpHandle)
+      CFBundleCloseBundleResourceMap(mpHandle, mNum);
+   mpHandle = nullptr;
+   mNum = 0;
 }
 #endif
 
-VSTEffect::VSTEffect(const wxString & path, VSTEffect *master)
+VSTEffect::VSTEffect(const PluginPath & path, VSTEffect *master)
 :  mPath(path),
    mMaster(master)
 {
@@ -1153,7 +1165,7 @@ VSTEffect::VSTEffect(const wxString & path, VSTEffect *master)
    memset(&mTimeInfo, 0, sizeof(mTimeInfo));
    mTimeInfo.samplePos = 0.0;
    mTimeInfo.sampleRate = 44100.0;  // this is a bogus value, but it's only for the display
-   mTimeInfo.nanoSeconds = wxGetLocalTimeMillis().ToDouble();
+   mTimeInfo.nanoSeconds = wxGetUTCTimeMillis().ToDouble();
    mTimeInfo.tempo = 120.0;
    mTimeInfo.timeSigNumerator = 4;
    mTimeInfo.timeSigDenominator = 4;
@@ -1182,20 +1194,20 @@ VSTEffect::~VSTEffect()
 }
 
 // ============================================================================
-// IdentInterface Implementation
+// ComponentInterface Implementation
 // ============================================================================
 
-wxString VSTEffect::GetPath()
+PluginPath VSTEffect::GetPath()
 {
    return mPath;
 }
 
-IdentInterfaceSymbol VSTEffect::GetSymbol()
+ComponentInterfaceSymbol VSTEffect::GetSymbol()
 {
    return mName;
 }
 
-IdentInterfaceSymbol VSTEffect::GetVendor()
+VendorSymbol VSTEffect::GetVendor()
 {
    return { mVendor };
 }
@@ -1219,13 +1231,12 @@ wxString VSTEffect::GetVersion()
    return version;
 }
 
-wxString VSTEffect::GetDescription()
+TranslatableString VSTEffect::GetDescription()
 {
    // VST does have a product string opcode and some effects return a short
    // description, but most do not or they just return the name again.  So,
    // try to provide some sort of useful information.
-   return wxString::Format( _("Audio In: %d, Audio Out: %d"),
-                            mAudioIns, mAudioOuts);
+   return XO("Audio In: %d, Audio Out: %d").Format( mAudioIns, mAudioOuts );
 }
 
 // ============================================================================
@@ -1253,7 +1264,7 @@ EffectType VSTEffect::GetType()
 }
 
 
-IdentInterfaceSymbol VSTEffect::GetFamilyId()
+EffectFamilySymbol VSTEffect::GetFamily()
 {
    return VSTPLUGINTYPE;
 }
@@ -1357,6 +1368,11 @@ size_t VSTEffect::SetBlockSize(size_t maxBlockSize)
    return mBlockSize;
 }
 
+size_t VSTEffect::GetBlockSize() const
+{
+   return mBlockSize;
+}
+
 void VSTEffect::SetSampleRate(double rate)
 {
    mSampleRate = (float) rate;
@@ -1390,7 +1406,7 @@ bool VSTEffect::ProcessInitialize(sampleCount WXUNUSED(totalLen), ChannelNames W
    // Initialize time info
    memset(&mTimeInfo, 0, sizeof(mTimeInfo));
    mTimeInfo.sampleRate = mSampleRate;
-   mTimeInfo.nanoSeconds = wxGetLocalTimeMillis().ToDouble();
+   mTimeInfo.nanoSeconds = wxGetUTCTimeMillis().ToDouble();
    mTimeInfo.tempo = 120.0;
    mTimeInfo.timeSigNumerator = 4;
    mTimeInfo.timeSigDenominator = 4;
@@ -1455,7 +1471,7 @@ bool VSTEffect::RealtimeInitialize()
 
 bool VSTEffect::RealtimeAddProcessor(unsigned numChannels, float sampleRate)
 {
-   mSlaves.push_back(make_movable<VSTEffect>(mPath, this));
+   mSlaves.push_back(std::make_unique<VSTEffect>(mPath, this));
    VSTEffect *const slave = mSlaves.back().get();
 
    slave->SetBlockSize(mBlockSize);
@@ -1585,7 +1601,8 @@ bool VSTEffect::RealtimeProcessEnd()
 /// provided by the effect, so it will not work with all effects since they don't
 /// all provide the information (kn0ck0ut is one).
 ///
-bool VSTEffect::ShowInterface(wxWindow *parent, bool forceModal)
+bool VSTEffect::ShowInterface(
+   wxWindow &parent, const EffectDialogFactory &factory, bool forceModal)
 {
    if (mDialog)
    {
@@ -1608,7 +1625,8 @@ bool VSTEffect::ShowInterface(wxWindow *parent, bool forceModal)
       ProcessInitialize(0, NULL);
    }
 
-   mDialog = mHost->CreateUI(parent, this);
+   if ( factory )
+      mDialog = factory(parent, mHost, this);
    if (!mDialog)
    {
       return false;
@@ -1633,7 +1651,7 @@ bool VSTEffect::GetAutomationParameters(CommandParameters & parms)
    for (int i = 0; i < mAEffect->numParams; i++)
    {
       wxString name = GetString(effGetParamName, i);
-      if (name.IsEmpty())
+      if (name.empty())
       {
          name.Printf(wxT("parm_%d"), i);
       }
@@ -1654,7 +1672,7 @@ bool VSTEffect::SetAutomationParameters(CommandParameters & parms)
    for (int i = 0; i < mAEffect->numParams; i++)
    {
       wxString name = GetString(effGetParamName, i);
-      if (name.IsEmpty())
+      if (name.empty())
       {
          name.Printf(wxT("parm_%d"), i);
       }
@@ -1678,7 +1696,7 @@ bool VSTEffect::SetAutomationParameters(CommandParameters & parms)
 }
 
 
-bool VSTEffect::LoadUserPreset(const wxString & name)
+bool VSTEffect::LoadUserPreset(const RegistryPath & name)
 {
    if (!LoadParameters(name))
    {
@@ -1690,14 +1708,14 @@ bool VSTEffect::LoadUserPreset(const wxString & name)
    return true;
 }
 
-bool VSTEffect::SaveUserPreset(const wxString & name)
+bool VSTEffect::SaveUserPreset(const RegistryPath & name)
 {
    return SaveParameters(name);
 }
 
-wxArrayString VSTEffect::GetFactoryPresets()
+RegistryPaths VSTEffect::GetFactoryPresets()
 {
-   wxArrayString progs; 
+   RegistryPaths progs;
 
    // Some plugins, like Guitar Rig 5, only report 128 programs while they have hundreds.  While
    // I was able to come up with a hack in the Guitar Rig case to gather all of the program names
@@ -1706,7 +1724,7 @@ wxArrayString VSTEffect::GetFactoryPresets()
    {
       for (int i = 0; i < mAEffect->numPrograms; i++)
       {
-         progs.Add(GetString(effGetProgramNameIndexed, i));
+         progs.push_back(GetString(effGetProgramNameIndexed, i));
       }
    }
 
@@ -1743,8 +1761,9 @@ void VSTEffect::SetHostUI(EffectUIHostInterface *host)
    mUIHost = host;
 }
 
-bool VSTEffect::PopulateUI(wxWindow *parent)
+bool VSTEffect::PopulateUI(ShuttleGui &S)
 {
+   auto parent = S.GetParent();
    mDialog = static_cast<wxDialog *>(wxGetTopLevelParent(parent));
    mParent = parent;
 
@@ -1845,16 +1864,20 @@ void VSTEffect::ExportPresets()
    // Passing a valid parent will cause some effects dialogs to malfunction
    // upon returning from the FileNames::SelectFile().
    path = FileNames::SelectFile(FileNames::Operation::_None,
-                       _("Save VST Preset As:"),
-                       FileNames::DataDir(),
-                       wxEmptyString,
-                       wxT("xml"),
-                       wxT("Standard VST bank file (*.fxb)|*.fxb|Standard VST program file (*.fxp)|*.fxp|Audacity VST preset file (*.xml)|*.xml"),
-                       wxFD_SAVE | wxFD_OVERWRITE_PROMPT | wxRESIZE_BORDER,
-                       NULL);
+      XO("Save VST Preset As:"),
+      FileNames::DataDir(),
+      wxEmptyString,
+      wxT("xml"),
+      {
+        { XO("Standard VST bank file"), { wxT("fxb") }, true },
+        { XO("Standard VST program file"), { wxT("fxp") }, true },
+        { XO("Audacity VST preset file"), { wxT("xml") }, true },
+      },
+      wxFD_SAVE | wxFD_OVERWRITE_PROMPT | wxRESIZE_BORDER,
+      NULL);
 
    // User canceled...
-   if (path.IsEmpty())
+   if (path.empty())
    {
       return;
    }
@@ -1877,10 +1900,11 @@ void VSTEffect::ExportPresets()
    else
    {
       // This shouldn't happen, but complain anyway
-      AudacityMessageBox(_("Unrecognized file extension."),
-                   _("Error Saving VST Presets"),
-                   wxOK | wxCENTRE,
-                   mParent);
+      AudacityMessageBox(
+         XO("Unrecognized file extension."),
+         XO("Error Saving VST Presets"),
+         wxOK | wxCENTRE,
+         mParent);
 
       return;
    }
@@ -1897,16 +1921,20 @@ void VSTEffect::ImportPresets()
 
    // Ask the user for the real name
    path = FileNames::SelectFile(FileNames::Operation::_None,
-                       _("Load VST Preset:"),
-                       FileNames::DataDir(),
-                       wxEmptyString,
-                       wxT("xml"),
-                       wxT("VST preset files (*.fxb; *.fxp; *.xml)|*.fxb;*.fxp;*.xml"),
-                       wxFD_OPEN | wxRESIZE_BORDER,
-                       mParent);
+      XO("Load VST Preset:"),
+      FileNames::DataDir(),
+      wxEmptyString,
+      wxT("xml"),
+      { {
+         XO("VST preset files"),
+         { wxT("fxb"), wxT("fxp"), wxT("xml") },
+         true
+      } },
+      wxFD_OPEN | wxRESIZE_BORDER,
+      mParent);
 
    // User canceled...
-   if (path.IsEmpty())
+   if (path.empty())
    {
       return;
    }
@@ -1929,20 +1957,22 @@ void VSTEffect::ImportPresets()
    else
    {
       // This shouldn't happen, but complain anyway
-      AudacityMessageBox(_("Unrecognized file extension."),
-                   _("Error Loading VST Presets"),
-                   wxOK | wxCENTRE,
-                   mParent);
+      AudacityMessageBox(
+         XO("Unrecognized file extension."),
+         XO("Error Loading VST Presets"),
+         wxOK | wxCENTRE,
+         mParent);
 
          return;
    }
 
    if (!success)
    {
-      AudacityMessageBox(_("Unable to load presets file."),
-                   _("Error Loading VST Presets"),
-                   wxOK | wxCENTRE,
-                   mParent);
+      AudacityMessageBox(
+         XO("Unable to load presets file."),
+         XO("Error Loading VST Presets"),
+         wxOK | wxCENTRE,
+         mParent);
 
       return;
    }
@@ -2061,10 +2091,8 @@ bool VSTEffect::Load()
    mBundleRef = std::move(bundleRef);
 
    // Open the resource map ... some plugins (like GRM Tools) need this.
-   mResource = ResourceHandle {
-      reinterpret_cast<char*>(
-         CFBundleOpenBundleResourceMap(mBundleRef.get())),
-      ResourceDeleter{&mBundleRef}
+   mResource = ResourceHandle{
+      mBundleRef.get(), CFBundleOpenBundleResourceMap(mBundleRef.get())
    };
 
 #elif defined(__WXMSW__)
@@ -2216,7 +2244,7 @@ bool VSTEffect::Load()
          mMidiIns = 0;
          mMidiOuts = 0;
 
-         // Check to see if parameters can be automated.  This isn't a gaurantee
+         // Check to see if parameters can be automated.  This isn't a guarantee
          // since it could be that the effect simply doesn't support the opcode.
          mAutomatable = false;
          for (int i = 0; i < mAEffect->numParams; i++)
@@ -2267,7 +2295,7 @@ void VSTEffect::Unload()
    if (mModule)
    {
 #if defined(__WXMAC__)
-      mResource = ResourceHandle{};
+      mResource.reset();
       mBundleRef.reset();
 #endif
 
@@ -2297,7 +2325,7 @@ std::vector<int> VSTEffect::GetEffectIDs()
    return effectIDs;
 }
 
-bool VSTEffect::LoadParameters(const wxString & group)
+bool VSTEffect::LoadParameters(const RegistryPath & group)
 {
    wxString value;
 
@@ -2341,7 +2369,7 @@ bool VSTEffect::LoadParameters(const wxString & group)
    return SetAutomationParameters(eap);
 }
 
-bool VSTEffect::SaveParameters(const wxString & group)
+bool VSTEffect::SaveParameters(const RegistryPath & group)
 {
    mHost->SetPrivateConfig(group, wxT("UniqueID"), mAEffect->uniqueID);
    mHost->SetPrivateConfig(group, wxT("Version"), mAEffect->version);
@@ -2414,7 +2442,7 @@ void VSTEffect::NeedEditIdle(bool state)
 
 VstTimeInfo *VSTEffect::GetTimeInfo()
 {
-   mTimeInfo.nanoSeconds = wxGetLocalTimeMillis().ToDouble();
+   mTimeInfo.nanoSeconds = wxGetUTCTimeMillis().ToDouble();
    return &mTimeInfo;
 }
 
@@ -2868,7 +2896,7 @@ void VSTEffect::BuildPlain()
                   mSampleRate,
                   NumericTextCtrl::Options{}
                      .AutoPos(true));
-            mDuration->SetName(_("Duration"));
+            mDuration->SetName( XO("Duration") );
             gridSizer->Add(mDuration, 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
             gridSizer->Add(1, 1, 0);
             gridSizer->Add(1, 1, 0);
@@ -2906,7 +2934,7 @@ void VSTEffect::BuildPlain()
                wxALIGN_RIGHT | wxST_NO_AUTORESIZE);
             gridSizer->Add(mNames[i], 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT | wxALL, 5);
 
-            mSliders[i] = safenew wxSlider(scroller,
+            mSliders[i] = safenew wxSliderWrapper(scroller,
                ID_Sliders + i,
                0,
                0,
@@ -2978,7 +3006,7 @@ void VSTEffect::RefreshParameters(int skip)
       name = text;
 
       text = GetString(effGetParamDisplay, i);
-      if (text.IsEmpty())
+      if (text.empty())
       {
          text.Printf(wxT("%.5g"),callGetParameter(i));
       }
@@ -2986,7 +3014,7 @@ void VSTEffect::RefreshParameters(int skip)
       name += wxT(' ') + text;
 
       text = GetString(effGetParamDisplay, i);
-      if (!text.IsEmpty())
+      if (!text.empty())
       {
          text.Printf(wxT("%-8s"), GetString(effGetParamLabel, i));
          mLabels[i]->SetLabel(wxString::Format(wxT("%8s"), text));
@@ -3044,10 +3072,11 @@ bool VSTEffect::LoadFXB(const wxFileName & fn)
    ArrayOf<unsigned char> data{ size_t(f.Length()) };
    if (!data)
    {
-      AudacityMessageBox(_("Unable to allocate memory when loading presets file."),
-                   _("Error Loading VST Presets"),
-                   wxOK | wxCENTRE,
-                   mParent);
+      AudacityMessageBox(
+         XO("Unable to allocate memory when loading presets file."),
+         XO("Error Loading VST Presets"),
+         wxOK | wxCENTRE,
+         mParent);
       return false;
    }
    unsigned char *bptr = data.get();
@@ -3058,10 +3087,11 @@ bool VSTEffect::LoadFXB(const wxFileName & fn)
       ssize_t len = f.Read((void *) bptr, f.Length());
       if (f.Error())
       {
-         AudacityMessageBox(_("Unable to read presets file."),
-                      _("Error Loading VST Presets"),
-                      wxOK | wxCENTRE,
-                      mParent);
+         AudacityMessageBox(
+            XO("Unable to read presets file."),
+            XO("Error Loading VST Presets"),
+            wxOK | wxCENTRE,
+            mParent);
          break;
       }
 
@@ -3215,10 +3245,11 @@ bool VSTEffect::LoadFXP(const wxFileName & fn)
    ArrayOf<unsigned char> data{ size_t(f.Length()) };
    if (!data)
    {
-      AudacityMessageBox(_("Unable to allocate memory when loading presets file."),
-                   _("Error Loading VST Presets"),
-                   wxOK | wxCENTRE,
-                   mParent);
+      AudacityMessageBox(
+         XO("Unable to allocate memory when loading presets file."),
+         XO("Error Loading VST Presets"),
+         wxOK | wxCENTRE,
+         mParent);
       return false;
    }
    unsigned char *bptr = data.get();
@@ -3229,10 +3260,11 @@ bool VSTEffect::LoadFXP(const wxFileName & fn)
       ssize_t len = f.Read((void *) bptr, f.Length());
       if (f.Error())
       {
-         AudacityMessageBox(_("Unable to read presets file."),
-                      _("Error Loading VST Presets"),
-                      wxOK | wxCENTRE,
-                      mParent);
+         AudacityMessageBox(
+            XO("Unable to read presets file."),
+            XO("Error Loading VST Presets"),
+            wxOK | wxCENTRE,
+            mParent);
          break;
       }
 
@@ -3425,10 +3457,11 @@ bool VSTEffect::LoadXML(const wxFileName & fn)
    if (!ok)
    {
       // Inform user of load failure
-      AudacityMessageBox(reader.GetErrorStr(),
-                   _("Error Loading VST Presets"),
-                   wxOK | wxCENTRE,
-                   mParent);
+      AudacityMessageBox(
+         reader.GetErrorStr(),
+         XO("Error Loading VST Presets"),
+         wxOK | wxCENTRE,
+         mParent);
       return false;
    }
 
@@ -3442,10 +3475,11 @@ void VSTEffect::SaveFXB(const wxFileName & fn)
    wxFFile f(fullPath, wxT("wb"));
    if (!f.IsOpened())
    {
-      AudacityMessageBox(wxString::Format(_("Could not open file: \"%s\""), fullPath),
-                   _("Error Saving VST Presets"),
-                   wxOK | wxCENTRE,
-                   mParent);
+      AudacityMessageBox(
+         XO("Could not open file: \"%s\"").Format( fullPath ),
+         XO("Error Saving VST Presets"),
+         wxOK | wxCENTRE,
+         mParent);
       return;
    }
 
@@ -3509,10 +3543,11 @@ void VSTEffect::SaveFXB(const wxFileName & fn)
 
    if (f.Error())
    {
-      AudacityMessageBox(wxString::Format(_("Error writing to file: \"%s\""), fullPath),
-                   _("Error Saving VST Presets"),
-                   wxOK | wxCENTRE,
-                   mParent);
+      AudacityMessageBox(
+         XO("Error writing to file: \"%s\"").Format( fullPath ),
+         XO("Error Saving VST Presets"),
+         wxOK | wxCENTRE,
+         mParent);
    }
 
    f.Close();
@@ -3527,10 +3562,11 @@ void VSTEffect::SaveFXP(const wxFileName & fn)
    wxFFile f(fullPath, wxT("wb"));
    if (!f.IsOpened())
    {
-      AudacityMessageBox(wxString::Format(_("Could not open file: \"%s\""), fullPath),
-                   _("Error Saving VST Presets"),
-                   wxOK | wxCENTRE,
-                   mParent);
+      AudacityMessageBox(
+         XO("Could not open file: \"%s\"").Format( fullPath ),
+         XO("Error Saving VST Presets"),
+         wxOK | wxCENTRE,
+         mParent);
       return;
    }
 
@@ -3542,10 +3578,11 @@ void VSTEffect::SaveFXP(const wxFileName & fn)
    f.Write(buf.GetData(), buf.GetDataLen());
    if (f.Error())
    {
-      AudacityMessageBox(wxString::Format(_("Error writing to file: \"%s\""), fullPath),
-                   _("Error Saving VST Presets"),
-                   wxOK | wxCENTRE,
-                   mParent);
+      AudacityMessageBox(
+         XO("Error writing to file: \"%s\"").Format( fullPath ),
+         XO("Error Saving VST Presets"),
+         wxOK | wxCENTRE,
+         mParent);
    }
 
    f.Close();
@@ -3615,7 +3652,7 @@ void VSTEffect::SaveFXProgram(wxMemoryBuffer & buf, int index)
 void VSTEffect::SaveXML(const wxFileName & fn)
 // may throw
 {
-   XMLFileWriter xmlFile{ fn.GetFullPath(), _("Error Saving Effect Presets") };
+   XMLFileWriter xmlFile{ fn.GetFullPath(), XO("Error Saving Effect Presets") };
 
    xmlFile.StartTag(wxT("vstprogrampersistence"));
    xmlFile.WriteAttr(wxT("version"), wxT("2"));
@@ -3736,9 +3773,13 @@ bool VSTEffect::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
 
             if (value != GetSymbol().Internal())
             {
-               wxString msg;
-               msg.Printf(_("This parameter file was saved from %s.  Continue?"), value);
-               int result = AudacityMessageBox(msg, wxT("Confirm"), wxYES_NO, mParent);
+               auto msg = XO("This parameter file was saved from %s. Continue?")
+                  .Format( value );
+               int result = AudacityMessageBox(
+                  msg,
+                  XO("Confirm"),
+                  wxYES_NO,
+                  mParent );
                if (result == wxNO)
                {
                   return false;

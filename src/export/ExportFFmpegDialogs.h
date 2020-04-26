@@ -11,21 +11,24 @@ LRN
 #if !defined(__EXPORT_FFMPEG_DIALOGS_H__)
 #define __EXPORT_FFMPEG_DIALOGS_H__
 
+#include "../Audacity.h"   // keep ffmpeg before wx because they interact // for USE_* macros
+
 #if defined(USE_FFMPEG)
 
-#include "../Audacity.h"   // keep ffmpeg before wx because they interact
 #include "../FFmpeg.h"     // and Audacity.h before FFmpeg for config*.h
 
-#include <wx/hashmap.h>
-#include <wx/listimpl.cpp>
 #include "../xml/XMLFileReader.h"
 #include "../FileNames.h"
-#include "../widgets/wxPanelWrapper.h"
 
-#ifndef __AUDACITY_OLD_STD__
 #include <unordered_map>
-#endif
+#include "audacity/Types.h"
 
+class wxArrayStringEx;
+
+class wxArrayString;
+class wxCheckBox;
+class wxStaticText;
+class wxTextCtrl;
 
 /// Identifiers for pre-set export types.
 enum FFmpegExposedFormat
@@ -33,6 +36,7 @@ enum FFmpegExposedFormat
    FMT_M4A,
    FMT_AC3,
    FMT_AMRNB,
+   FMT_OPUS,
    FMT_WMA2,
    FMT_OTHER,
    FMT_LAST
@@ -45,16 +49,14 @@ struct ExposedFormat
 {
    FFmpegExposedFormat fmtid; //!< one of the FFmpegExposedFormat
    const wxChar *name;        //!< format name (internal, should be unique; if not - export dialog may show unusual behaviour)
-   const wxChar *extension;   //!< default extension for this format. More extensions may be added later via AddExtension.
+   const FileExtension extension;   //!< default extension for this format. More extensions may be added later via AddExtension.
    const wxChar *shortname;   //!< used to guess the format
    unsigned maxchannels;      //!< how many channels this format could handle
    const int canmetadata;           //!< !=0 if format supports metadata, AV_CANMETA any avformat version, otherwise version support added
    bool canutf8;              //!< true if format supports metadata in UTF-8, false otherwise
-   const wxChar *description_; //!< format description (will be shown in export dialog) (untranslated!)
+   const TranslatableString description; //!< format description (will be shown in export dialog)
    AVCodecID codecid;         //!< codec ID (see libavcodec/avcodec.h)
    bool compiledIn;           //!< support for this codec/format is compiled in (checked at runtime)
-
-   wxString Description() const; // get translation
 };
 
 
@@ -78,16 +80,11 @@ public:
    bool TransferDataToWindow() override;
    bool TransferDataFromWindow() override;
 
-   /// Bit Rates supported by AC3 encoder
-   static const int iAC3BitRates[];
    /// Sample Rates supported by AC3 encoder (must end with zero-element)
    /// It is not used in dialog anymore, but will be required later
    static const int iAC3SampleRates[];
 
 private:
-
-   wxArrayString mBitRateNames;
-   std::vector<int>    mBitRateLabels;
 
    wxChoice *mBitRateChoice;
    int mBitRateFromChoice;
@@ -103,10 +100,6 @@ public:
    void PopulateOrExchange(ShuttleGui & S);
    bool TransferDataToWindow() override;
    bool TransferDataFromWindow() override;
-
-private:
-
-   wxSpinCtrl *mQualitySpin;
 };
 
 class ExportFFmpegAMRNBOptions final : public wxPanelWrapper
@@ -120,15 +113,44 @@ public:
    bool TransferDataToWindow() override;
    bool TransferDataFromWindow() override;
 
-   static int iAMRNBBitRate[];
-
 private:
-
-   wxArrayString mBitRateNames;
-   std::vector<int>    mBitRateLabels;
 
    wxChoice *mBitRateChoice;
    int mBitRateFromChoice;
+};
+
+class ExportFFmpegOPUSOptions final : public wxPanelWrapper
+{
+public:
+
+   ExportFFmpegOPUSOptions(wxWindow *parent, int format);
+   ~ExportFFmpegOPUSOptions();
+
+   void PopulateOrExchange(ShuttleGui & S);
+   bool TransferDataToWindow() override;
+   bool TransferDataFromWindow() override;
+
+   static const int iOPUSSampleRates[];
+
+private:
+
+   wxSlider *mBitRateSlider;
+   int mBitRateFromSlider;
+
+   wxChoice *mVbrChoice;
+   int mVbrFromChoice;
+
+   wxSlider *mComplexitySlider;
+   int mComplexityFromSlider;
+
+   wxChoice *mFramesizeChoice;
+   int mFramesizeFromChoice;
+
+   wxChoice *mApplicationChoice;
+   int mApplicationFromChoice;
+
+   wxChoice *mCuttoffChoice;
+   int mCutoffFromChoice;
 };
 
 class ExportFFmpegWMAOptions final : public wxPanelWrapper
@@ -143,12 +165,8 @@ public:
    bool TransferDataFromWindow() override;
 
    static const int iWMASampleRates[];
-   static const int iWMABitRate[];
 
 private:
-
-   wxArrayString mBitRateNames;
-   std::vector<int>    mBitRateLabels;
 
    wxChoice *mBitRateChoice;
    int mBitRateFromChoice;
@@ -168,6 +186,8 @@ public:
    void OnOpen(wxCommandEvent & evt);
 
 private:
+   wxTextCtrl *mFormat;
+   wxTextCtrl *mCodec;
 
    DECLARE_EVENT_TABLE()
 };
@@ -192,6 +212,7 @@ public:
    ~ExportFFmpegOptions();
    void PopulateOrExchange(ShuttleGui & S);
    void OnOK(wxCommandEvent& event);
+   void OnGetURL(wxCommandEvent& event);
    void OnFormatList(wxCommandEvent& event);
    void DoOnFormatList();
    void OnCodecList(wxCommandEvent& event);
@@ -203,10 +224,11 @@ public:
    void OnDeletePreset(wxCommandEvent& event);
    void OnImportPresets(wxCommandEvent& event);
    void OnExportPresets(wxCommandEvent& event);
+   bool SavePreset( bool bCheckForOverwrite);
+
 
    // Static tables
    static CompatibilityEntry CompatibilityList[];
-   static int iAACProfileValues[];
    static ExposedFormat fmts[];
    static const int iAACSampleRates[];
    static ApplicableFor apptable[];
@@ -217,17 +239,10 @@ private:
    wxArrayString mShownFormatLongNames;
    wxArrayString mShownCodecNames;
    wxArrayString mShownCodecLongNames;
-   wxArrayString mFormatNames;
+   wxArrayStringEx mFormatNames;
    wxArrayString mFormatLongNames;
-   wxArrayString mCodecNames;
+   wxArrayStringEx mCodecNames;
    wxArrayString mCodecLongNames;
-   wxArrayString mProfileNames;
-   std::vector<int> mProfileLabels;
-   wxArrayString mPredictionOrderMethodNames;
-   std::vector<int> mPredictionOrderMethodLabels;
-
-   wxChoice *mFormatChoice;
-   wxChoice *mCodecChoice;
 
    wxListBox *mFormatList;
    wxListBox *mCodecList;
@@ -235,69 +250,44 @@ private:
    wxStaticText *mFormatName;
    wxStaticText *mCodecName;
 
-   wxChoice *mPresetChoice;
    wxComboBox *mPresetCombo;
-   wxSpinCtrl *mBitrateSpin;
-   wxSpinCtrl *mQualitySpin;
-   wxSpinCtrl *mSampleRateSpin;
-   wxTextCtrl *mLanguageText;
-   wxTextCtrl *mTag;
-   wxSpinCtrl *mCutoffSpin;
-   wxCheckBox *mBitReservoirCheck;
-   wxChoice *mProfileChoice;
-   //wxSpinCtrl *mTrellisSpin; //trellis is only applicable for ADPCM...scrap it.
-   wxSpinCtrl *mCompressionLevelSpin;
-   wxSpinCtrl *mFrameSizeSpin;
-   wxCheckBox *mUseLPCCheck;
-   wxSpinCtrl *mLPCCoeffsPrecisionSpin;
-   wxSpinCtrl *mMinPredictionOrderSpin;
-   wxSpinCtrl *mMaxPredictionOrderSpin;
-   wxChoice *mPredictionOrderMethodChoice;
-   wxSpinCtrl *mMinPartitionOrderSpin;
-   wxSpinCtrl *mMaxPartitionOrderSpin;
-   wxSpinCtrl *mMuxRate;
-   wxSpinCtrl *mPacketSize;
-
-   wxButton *mOk;
-   wxButton *mSavePreset;
-   wxButton *mLoadPreset;
-   wxButton *mDeletePreset;
-   wxButton *mImportPresets;
-   wxButton *mExportPresets;
 
    int mBitRateFromChoice;
    int mSampleRateFromChoice;
 
    std::unique_ptr<FFmpegPresets> mPresets;
 
-   wxArrayString mPresetNames;
+   wxArrayStringEx mPresetNames;
 
-   /// Finds the format currently selected and returns it's name and description
+   /// Finds the format currently selected and returns its name and description
    void FindSelectedFormat(wxString **name, wxString **longname);
 
-   /// Finds the codec currently selected and returns it's name and description
+   /// Finds the codec currently selected and returns its name and description
    void FindSelectedCodec(wxString **name, wxString **longname);
 
-   /// Retreives format list from libavformat
+   /// Retrieves format list from libavformat
    void FetchFormatList();
 
-   /// Retreives a list of formats compatible to codec
+   /// Retrieves a list of formats compatible to codec
    ///\param id Codec ID
    ///\param selfmt format selected at the moment
    ///\return index of the selfmt in NEW format list or -1 if it is not in the list
    int FetchCompatibleFormatList(AVCodecID id, wxString *selfmt);
 
-   /// Retreives codec list from libavcodec
+   /// Retrieves codec list from libavcodec
    void FetchCodecList();
 
-   /// Retreives a list of codecs compatible to format
+   /// Retrieves a list of codecs compatible to format
    ///\param fmt Format short name
    ///\param id id of the codec selected at the moment
    ///\return index of the id in NEW codec list or -1 if it is not in the list
    int FetchCompatibleCodecList(const wxChar *fmt, AVCodecID id);
 
-   /// Retreives list of presets from configuration file
+   /// Retrieves list of presets from configuration file
    void FetchPresetList();
+
+   bool ReportIfBadCombination();
+
 
    // Enables/disables controls based on format/codec combination,
    // leaving only relevant controls enabled.
@@ -332,8 +322,9 @@ public:
 
    void GetPresetList(wxArrayString &list);
    void LoadPreset(ExportFFmpegOptions *parent, wxString &name);
-   void SavePreset(ExportFFmpegOptions *parent, wxString &name);
+   bool SavePreset(ExportFFmpegOptions *parent, wxString &name);
    void DeletePreset(wxString &name);
+   bool OverwriteIsOk( wxString &name );
    FFmpegPreset *FindPreset(wxString &name);
 
    void ImportPresets(wxString &filename);

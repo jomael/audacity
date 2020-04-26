@@ -34,20 +34,25 @@ of the BlockFile system.
 #include <wx/valtext.h>
 #include <wx/intl.h>
 
+#include "DirManager.h"
 #include "ShuttleGui.h"
 #include "Project.h"
+#include "WaveClip.h"
 #include "WaveTrack.h"
 #include "Sequence.h"
 #include "Prefs.h"
+#include "ProjectSettings.h"
+#include "ViewInfo.h"
 
 #include "FileNames.h"
-#include "widgets/ErrorDialog.h"
+#include "widgets/AudacityMessageBox.h"
+#include "widgets/wxPanelWrapper.h"
 
 class BenchmarkDialog final : public wxDialogWrapper
 {
 public:
    // constructors and destructors
-   BenchmarkDialog( wxWindow *parent );
+   BenchmarkDialog( wxWindow *parent, const ProjectSettings &settings );
 
    void MakeBenchmarkDialog();
 
@@ -58,9 +63,11 @@ private:
    void OnClear( wxCommandEvent &event );
    void OnClose( wxCommandEvent &event );
 
-   void Printf(const wxChar *format, ...);
+   void Printf(const TranslatableString &str);
    void HoldPrint(bool hold);
    void FlushPrint();
+
+   const ProjectSettings &mSettings;
 
    bool      mHoldPrint;
    wxString  mToPrint;
@@ -79,22 +86,23 @@ private:
    DECLARE_EVENT_TABLE()
 };
 
-void RunBenchmark(wxWindow *parent)
+void RunBenchmark( wxWindow *parent, const ProjectSettings &settings )
 {
    /*
    int action = AudacityMessageBox(
-_("This will close all project windows (without saving)\nand open the Audacity Benchmark dialog.\n\nAre you sure you want to do this?"),
-                             _("Benchmark"),
-                             wxYES_NO | wxICON_EXCLAMATION,
-                             NULL);
+XO("This will close all project windows (without saving)\nand open the Audacity Benchmark dialog.\n\nAre you sure you want to do this?"),
+      XO("Benchmark"),
+      wxYES_NO | wxICON_EXCLAMATION,
+      NULL);
 
    if (action != wxYES)
       return;
 
-   CloseAllProjects();
+   for ( auto pProject : AllProjects{} )
+      GetProjectFrame( *pProject ).Close();
    */
 
-   BenchmarkDialog dlog(parent);
+   BenchmarkDialog dlog{ parent, settings };
 
    dlog.CentreOnParent();
 
@@ -123,14 +131,17 @@ BEGIN_EVENT_TABLE(BenchmarkDialog, wxDialogWrapper)
    EVT_BUTTON( wxID_CANCEL, BenchmarkDialog::OnClose )
 END_EVENT_TABLE()
 
-BenchmarkDialog::BenchmarkDialog(wxWindow *parent):
-/* i18n-hint: Benchmark means a software speed test */
-      wxDialogWrapper( parent, 0, _("Benchmark"),
+BenchmarkDialog::BenchmarkDialog(
+   wxWindow *parent, const ProjectSettings &settings)
+   :
+      /* i18n-hint: Benchmark means a software speed test */
+      wxDialogWrapper( parent, 0, XO("Benchmark"),
                 wxDefaultPosition, wxDefaultSize,
                 wxDEFAULT_DIALOG_STYLE |
                 wxRESIZE_BORDER)
+   , mSettings{ settings }
 {
-   SetName(GetTitle());
+   SetName();
 
    mBlockSizeStr = wxT("64");
    mNumEditsStr = wxT("100");
@@ -155,7 +166,6 @@ void BenchmarkDialog::OnClose(wxCommandEvent & WXUNUSED(event))
 void BenchmarkDialog::MakeBenchmarkDialog()
 {
    ShuttleGui S(this, eIsCreating);
-   wxControl *item;
 
    // Strings don't need to be translated because this class doesn't
    // ever get used in a stable release.
@@ -166,53 +176,55 @@ void BenchmarkDialog::MakeBenchmarkDialog()
       S.StartMultiColumn(4);
       {
          //
-         item = S.Id(BlockSizeID).AddTextBox(_("Disk Block Size (KB):"),
+         S.Id(BlockSizeID)
+            .Validator<wxTextValidator>(wxFILTER_NUMERIC, &mBlockSizeStr)
+            .AddTextBox(XO("Disk Block Size (KB):"),
                                              wxT(""),
                                              12);
-         item->SetValidator(wxTextValidator(wxFILTER_NUMERIC,
-                                         &mBlockSizeStr));
 
          //
-         item = S.Id(NumEditsID).AddTextBox(_("Number of Edits:"),
+         S.Id(NumEditsID)
+            .Validator<wxTextValidator>(wxFILTER_NUMERIC, &mNumEditsStr)
+            .AddTextBox(XO("Number of Edits:"),
                                             wxT(""),
                                             12);
-         item->SetValidator(wxTextValidator(wxFILTER_NUMERIC,
-                                         &mNumEditsStr));
 
          //
-         item = S.Id(DataSizeID).AddTextBox(_("Test Data Size (MB):"),
+         S.Id(DataSizeID)
+            .Validator<wxTextValidator>(wxFILTER_NUMERIC, &mDataSizeStr)
+            .AddTextBox(XO("Test Data Size (MB):"),
                                             wxT(""),
                                             12);
-         item->SetValidator(wxTextValidator(wxFILTER_NUMERIC,
-                                         &mDataSizeStr));
 
          ///
-         /* i18n-hint: A "seed" is a number that initializes a
-            pseudorandom number generating algorithm */
-         item = S.Id(RandSeedID).AddTextBox(_("Random Seed:"),
+         S.Id(RandSeedID)
+            .Validator<wxTextValidator>(wxFILTER_NUMERIC, &mRandSeedStr)
+            /* i18n-hint: A "seed" is a number that initializes a
+               pseudorandom number generating algorithm */
+            .AddTextBox(XO("Random Seed:"),
                                             wxT(""),
                                             12);
-         item->SetValidator(wxTextValidator(wxFILTER_NUMERIC,
-                                         &mRandSeedStr));
 
       }
       S.EndMultiColumn();
 
       //
-      item = S.AddCheckBox(_("Show detailed info about each block file"),
-                           wxT("false"));
-      item->SetValidator(wxGenericValidator(&mBlockDetail));
+      S.Validator<wxGenericValidator>(&mBlockDetail)
+         .AddCheckBox(XO("Show detailed info about each block file"),
+                           false);
 
       //
-      item = S.AddCheckBox(_("Show detailed info about each editing operation"),
-                           wxT("false"));
-      item->SetValidator(wxGenericValidator(&mEditDetail));
+      S.Validator<wxGenericValidator>(&mEditDetail)
+         .AddCheckBox(XO("Show detailed info about each editing operation"),
+                           false);
 
       //
-      mText = S.Id(StaticTextID).AddTextWindow(wxT(""));
-      /* i18n-hint noun */
-      mText->SetName(_("Output"));
-      mText->SetSizeHints(wxSize(500,200));
+      mText = S.Id(StaticTextID)
+         /* i18n-hint noun */
+         .Name(XO("Output"))
+         .Style( wxTE_MULTILINE | wxTE_READONLY | wxTE_RICH )
+         .MinSize( { 500, 200 } )
+         .AddTextWindow(wxT(""));
 
       //
       S.SetBorder(10);
@@ -220,10 +232,10 @@ void BenchmarkDialog::MakeBenchmarkDialog()
       {
          S.StartHorizontalLay(wxALIGN_LEFT, false);
          {
-            S.Id(RunID).AddButton(_("Run"))->SetDefault();
-            S.Id(BSaveID).AddButton(_("Save"));
+            S.Id(RunID).AddButton(XO("Run"), wxALIGN_CENTRE, true);
+            S.Id(BSaveID).AddButton(XO("Save"));
             /* i18n-hint verb; to empty or erase */
-            S.Id(ClearID).AddButton(_("Clear"));
+            S.Id(ClearID).AddButton(XO("Clear"));
          }
          S.EndHorizontalLay();
 
@@ -236,7 +248,7 @@ void BenchmarkDialog::MakeBenchmarkDialog()
          S.StartHorizontalLay(wxALIGN_NOT | wxALIGN_LEFT, false);
          {
             /* i18n-hint verb */
-            S.Id(wxID_CANCEL).AddButton(_("Close"));
+            S.Id(wxID_CANCEL).AddButton(XO("Close"));
          }
          S.EndHorizontalLay();
       }
@@ -252,18 +264,18 @@ void BenchmarkDialog::OnSave( wxCommandEvent & WXUNUSED(event))
 {
 /* i18n-hint: Benchmark means a software speed test;
    leave untranslated file extension .txt */
-   wxString fName = _("benchmark.txt");
+   auto fName = XO("benchmark.txt").Translation();
 
    fName = FileNames::SelectFile(FileNames::Operation::Export,
-                        _("Export Benchmark Data as:"),
-                        wxEmptyString,
-                        fName,
-                        wxT("txt"),
-                        wxT("*.txt"),
-                        wxFD_SAVE | wxRESIZE_BORDER,
-                        this);
+      XO("Export Benchmark Data as:"),
+      wxEmptyString,
+      fName,
+      wxT("txt"),
+      { FileNames::TextFiles },
+      wxFD_SAVE | wxRESIZE_BORDER,
+      this);
 
-   if (fName == wxT(""))
+   if (fName.empty())
       return;
 
    mText->SaveFile(fName);
@@ -274,17 +286,12 @@ void BenchmarkDialog::OnClear(wxCommandEvent & WXUNUSED(event))
    mText->Clear();
 }
 
-void BenchmarkDialog::Printf(const wxChar *format, ...)
+void BenchmarkDialog::Printf(const TranslatableString &str)
 {
-   va_list argptr;
-   va_start(argptr, format);
-
-   wxString s = wxString::FormatV(format, argptr);
+   auto s = str.Translation();
    mToPrint += s;
    if (!mHoldPrint)
       FlushPrint();
-
-   va_end(argptr);
 }
 
 void BenchmarkDialog::HoldPrint(bool hold)
@@ -297,11 +304,11 @@ void BenchmarkDialog::HoldPrint(bool hold)
 
 void BenchmarkDialog::FlushPrint()
 {
-   while(mToPrint.Length() > 100) {
+   while(mToPrint.length() > 100) {
       mText->AppendText(mToPrint.Left(100));
-      mToPrint = mToPrint.Right(mToPrint.Length() - 100);
+      mToPrint = mToPrint.Right(mToPrint.length() - 100);
    }
-   if (mToPrint.Length() > 0)
+   if (mToPrint.length() > 0)
       mText->AppendText(mToPrint);
    mToPrint = wxT("");
 }
@@ -323,17 +330,20 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    mRandSeedStr.ToLong(&randSeed);
 
    if (blockSize < 1 || blockSize > 1024) {
-      AudacityMessageBox(_("Block size should be in the range 1 - 1024 KB."));
+      AudacityMessageBox(
+         XO("Block size should be in the range 1 - 1024 KB.") );
       return;
    }
 
    if (numEdits < 1 || numEdits > 10000) {
-      AudacityMessageBox(_("Number of edits should be in the range 1 - 10000."));
+      AudacityMessageBox(
+         XO("Number of edits should be in the range 1 - 10000.") );
       return;
    }
 
    if (dataSize < 1 || dataSize > 2000) {
-      AudacityMessageBox(_("Test data size should be in the range 1 - 2000 MB."));
+      AudacityMessageBox(
+         XO("Test data size should be in the range 1 - 2000 MB.") );
       return;
    }
 
@@ -342,7 +352,7 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    gPrefs->Write(wxT("/GUI/EditClipCanMove"), false);
    gPrefs->Flush();
 
-   // Rememebr the old blocksize, so that we can restore it later.
+   // Remember the old blocksize, so that we can restore it later.
    auto oldBlockSize = Sequence::GetMaxDiskBlockSize();
    Sequence::SetMaxDiskBlockSize(blockSize * 1024);
 
@@ -357,8 +367,9 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    HoldPrint(true);
 
    ZoomInfo zoomInfo(0.0, ZoomInfo::GetDefaultZoom());
-   auto dd = std::make_shared<DirManager>();
-   const auto t = TrackFactory{ dd, &zoomInfo }.NewWaveTrack(int16Sample);
+   auto dd = DirManager::Create();
+   const auto t =
+      TrackFactory{ mSettings, dd, &zoomInfo }.NewWaveTrack(int16Sample);
 
    t->SetRate(1);
 
@@ -377,8 +388,8 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    // They are (and are supposed to be) a different size to
    // the blocks that make the blockfiles.  That way we get to
    // do some testing of when edit chunks cross blockfile boundaries.
-   Printf(_("Using %d chunks of %d samples each, for a total of %.1f MB.\n"),
-          nChunks, chunkSize, nChunks*chunkSize*sizeof(short)/1048576.0);
+   Printf( XO("Using %ld chunks of %ld samples each, for a total of %.1f MB.\n")
+      .Format( nChunks, chunkSize, nChunks*chunkSize*sizeof(short)/1048576.0 ) );
 
    int trials = numEdits;
 
@@ -386,7 +397,7 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    Shorts small1{ nChunks };
    Shorts block{ chunkSize };
 
-   Printf(_("Preparing...\n"));
+   Printf( XO("Preparing...\n") );
 
    wxTheApp->Yield();
    FlushPrint();
@@ -414,12 +425,15 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    t->GetEndTime();
 
    if (t->GetClipByIndex(0)->GetSequence()->GetNumSamples() != nChunks * chunkSize) {
-      Printf(_("Expected len %d, track len %lld.\n"), nChunks * chunkSize,
-             t->GetClipByIndex(0)->GetSequence()->GetNumSamples().as_long_long());
+      Printf( XO("Expected len %ld, track len %lld.\n")
+         .Format(
+            nChunks * chunkSize,
+            t->GetClipByIndex(0)->GetSequence()->GetNumSamples()
+               .as_long_long() ) );
       goto fail;
    }
 
-   Printf(_("Performing %d edits...\n"), trials);
+   Printf( XO("Performing %d edits...\n").Format( trials ) );
    wxTheApp->Yield();
    FlushPrint();
 
@@ -433,18 +447,22 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
       // 1 <= xlen <= nChunks - x0
       const size_t xlen = 1 + (rand() % (nChunks - x0));
       if (mEditDetail)
-         Printf(_("Cut: %d - %d \n"), x0 * chunkSize, (x0 + xlen) * chunkSize);
+         Printf( XO("Cut: %ld - %ld \n")
+            .Format( x0 * chunkSize, (x0 + xlen) * chunkSize) );
 
       Track::Holder tmp;
       try {
          tmp = t->Cut(double (x0 * chunkSize), double ((x0 + xlen) * chunkSize));
       }
       catch (const AudacityException&) {
-         Printf(_("Trial %d\n"), z);
-         Printf(_("Cut (%d, %d) failed.\n"), (x0 * chunkSize),
-                (x0 + xlen) * chunkSize);
-         Printf(_("Expected len %d, track len %lld.\n"), nChunks * chunkSize,
-                t->GetClipByIndex(0)->GetSequence()->GetNumSamples().as_long_long());
+         Printf( XO("Trial %d\n").Format( z ) );
+         Printf( XO("Cut (%ld, %ld) failed.\n")
+            .Format( (x0 * chunkSize), (x0 + xlen) * chunkSize) );
+         Printf( XO("Expected len %ld, track len %lld.\n")
+            .Format(
+               nChunks * chunkSize,
+               t->GetClipByIndex(0)->GetSequence()->GetNumSamples()
+                  .as_long_long() ) );
          goto fail;
       }
 
@@ -453,20 +471,23 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
       const size_t y0 = rand() % (nChunks - xlen + 1);
 
       if (mEditDetail)
-         Printf(_("Paste: %d\n"), y0 * chunkSize);
+         Printf( XO("Paste: %ld\n").Format( y0 * chunkSize ) );
 
       try {
          t->Paste((double)(y0 * chunkSize), tmp.get());
       }
       catch (const AudacityException&) {
-         Printf(_("Trial %d\nFailed on Paste.\n"), z);
+         Printf( XO("Trial %d\nFailed on Paste.\n").Format( z ) );
          goto fail;
       }
 
       if (t->GetClipByIndex(0)->GetSequence()->GetNumSamples() != nChunks * chunkSize) {
-         Printf(_("Trial %d\n"), z);
-         Printf(_("Expected len %d, track len %lld.\n"), nChunks * chunkSize,
-                t->GetClipByIndex(0)->GetSequence()->GetNumSamples().as_long_long());
+         Printf( XO("Trial %d\n").Format( z ) );
+         Printf( XO("Expected len %ld, track len %lld.\n")
+            .Format(
+               nChunks * chunkSize,
+               t->GetClipByIndex(0)->GetSequence()->GetNumSamples()
+                  .as_long_long() ) );
          goto fail;
       }
 
@@ -484,19 +505,19 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
       seq->DebugPrintf(seq->GetBlockArray(), seq->GetNumSamples(), &tempStr);
       mToPrint += tempStr;
    }
-   Printf(_("Time to perform %d edits: %ld ms\n"), trials, elapsed);
+   Printf( XO("Time to perform %d edits: %ld ms\n").Format( trials, elapsed ) );
    FlushPrint();
    wxTheApp->Yield();
 
 
 #if 0
-   Printf(_("Checking file pointer leaks:\n"));
-   Printf(_("Track # blocks: %d\n"), t->GetBlockArray()->Count());
-   Printf(_("Disk # blocks: \n"));
+   Printf( XO("Checking file pointer leaks:\n") );
+   Printf( XO("Track # blocks: %ld\n").Format( t->GetBlockArray()->size() ) );
+   Printf( XO("Disk # blocks: \n") );
    system("ls .audacity_temp/* | wc --lines");
 #endif
 
-   Printf(_("Doing correctness check...\n"));
+   Printf( XO("Doing correctness check...\n") );
    FlushPrint();
    wxTheApp->Yield();
 
@@ -509,19 +530,19 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
          if (block[b] != v) {
             bad++;
             if (bad < 10)
-               Printf(_("Bad: chunk %d sample %d\n"), i, b);
+               Printf( XO("Bad: chunk %ld sample %ld\n").Format( i, b ) );
             b = chunkSize;
          }
    }
    if (bad == 0)
-      Printf(_("Passed correctness check!\n"));
+      Printf( XO("Passed correctness check!\n") );
    else
-      Printf(_("Errors in %d/%d chunks\n"), bad, nChunks);
+      Printf( XO("Errors in %d/%ld chunks\n").Format( bad, nChunks ) );
 
    elapsed = timer.Time();
 
-   Printf(_("Time to check all data: %ld ms\n"), elapsed);
-   Printf(_("Reading data again...\n"));
+   Printf( XO("Time to check all data: %ld ms\n").Format( elapsed ) );
+   Printf( XO("Reading data again...\n") );
 
    wxTheApp->Yield();
    FlushPrint();
@@ -538,20 +559,20 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
 
    elapsed = timer.Time();
 
-   Printf(_("Time to check all data (2): %ld ms\n"), elapsed);
+   Printf( XO("Time to check all data (2): %ld ms\n").Format( elapsed ) );
 
-   Printf(_("At 44100 Hz, 16-bits per sample, the estimated number of\n simultaneous tracks that could be played at once: %.1f\n"),
-          (nChunks*chunkSize/44100.0)/(elapsed/1000.0));
+   Printf( XO("At 44100 Hz, 16-bits per sample, the estimated number of\n simultaneous tracks that could be played at once: %.1f\n" )
+      .Format( (nChunks*chunkSize/44100.0)/(elapsed/1000.0) ) );
 
    goto success;
 
  fail:
-   Printf(_("TEST FAILED!!!\n"));
+   Printf( XO("TEST FAILED!!!\n") );
 
  success:
 
    dd.reset();
 
-   Printf(_("Benchmark completed successfully.\n"));
+   Printf( XO("Benchmark completed successfully.\n") );
    HoldPrint(false);
 }

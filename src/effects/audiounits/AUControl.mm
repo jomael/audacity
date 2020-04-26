@@ -22,8 +22,7 @@
 **********************************************************************/
 
 #include "../../Audacity.h"
-#include <AudioUnit/AudioUnit.h>
-#include <AudioUnit/AudioComponent.h>
+#include "AUControl.h"
 #include <AudioUnit/AudioUnitProperties.h>
 #include <AudioUnit/AUCocoaUIView.h>
 #include <CoreAudioKit/CoreAudioKit.h>
@@ -32,12 +31,14 @@
 #include <AudioUnit/AudioUnitCarbonView.h>
 #endif
 
-#include "AUControl.h"
 #include "../../MemoryX.h"
 
 @interface AUView : NSView
 {
+@public
    AUControl *mControl;
+   NSView *mView;
+   bool mRedraw;
 }
 @end
 
@@ -53,12 +54,13 @@
    }
 }
 
-- (instancetype)initWithControl:(AUControl *)control
+- (instancetype)initWithControl:(AUControl *)control;
 {
    // Make sure a parameters were provided
    NSParameterAssert(control);
 
    mControl = control;
+   mRedraw = NO;
 
    [super init];
 
@@ -68,6 +70,30 @@
 - (BOOL)autoresizesSubviews
 {
    return NO;
+}
+
+- (void)viewWillDraw
+{
+   // LLL:  Hackage alert!  I have absolutely no idea why the AudioUnitView doesn't
+   //       get redrawn after the ClassInfo is updated, but this bit of malarkey
+   //       gets around this issue.
+   //
+   //       To see the problem, comment out the setFrameSize calls below, create/save
+   //       a preset for the AUDelay effect with "Invert Feedback" checked, restore
+   //       factory defaults and then reselect the save preset.  The display will not
+   //       update properly.  But, resize the window and it does.
+   //
+   //       Again, this is total hackage and I hope to find the real cause soon.
+   if (mRedraw)
+   {
+      NSRect viewRect = [mView frame];
+      NSRect bogusRect = {};
+      [mView setFrameSize:bogusRect.size];
+      [mView setFrameSize:viewRect.size];
+      mRedraw = NO;
+   }
+
+   [super viewWillDraw];
 }
 
 - (void)cocoaViewResized:(NSNotification *)notification
@@ -173,23 +199,35 @@ bool AUControl::Create(wxWindow *parent, AudioComponent comp, AudioUnit unit, bo
 #endif
    }
 
-   if (!mView && !mHIView)
+   if (!mView
+#if !defined(_LP64)
+       && !mHIView
+#endif
+       )
    {
       CreateGeneric();
    }
 
-   if (!mView && !mHIView)
+   if (!mView
+#if !defined(_LP64)
+       && !mHIView
+#endif
+       )
    {
       return false;
    }
 
+   ((AUView *)mAUView)->mView = mView;
+
    // wxWidgets takes ownership so safenew
    SetPeer(safenew AUControlImpl(this, mAUView));
 
+#if !defined(_LP64)
    if (mHIView)
    {
       CreateCarbonOverlay();
    }
+#endif
 
    // Must get the size again since SetPeer() could cause it to change
    SetInitialSize(GetMinSize());
@@ -217,21 +255,34 @@ void AUControl::OnSize(wxSizeEvent & evt)
 
       NSRect viewFrame = [mAUView frame];
       NSRect viewRect = [mView frame];
-   
-      if (mask & NSViewWidthSizable)
+
+      if (mask & (NSViewWidthSizable | NSViewHeightSizable))
       {
-         viewRect.size.width = sz.GetWidth();
-      }
+         if (mask & NSViewWidthSizable)
+         {
+            viewRect.size.width = sz.GetWidth();
+         }
 
-      if (mask & NSViewHeightSizable)
+         if (mask & NSViewHeightSizable)
+         {
+            viewRect.size.height = sz.GetHeight();
+         }
+
+         viewRect.origin.x = 0;
+         viewRect.origin.y = 0;
+
+         [mView setFrame:viewRect];
+      }
+      else
       {
-         viewRect.size.height = sz.GetHeight();
+         viewRect.origin.x = abs((viewFrame.size.width - viewRect.size.width) / 2);
+         viewRect.origin.y = abs((viewFrame.size.height - viewRect.size.height) / 2);
+
+         if (viewRect.origin.x || viewRect.origin.y)
+         {
+            [mAUView setFrame:viewRect];
+         }
       }
-
-      viewRect.origin.x = (viewFrame.size.width - viewRect.size.width) / 2;
-      viewRect.origin.y = (viewFrame.size.height - viewRect.size.height) / 2;
-
-      [mView setFrame:viewRect];
    }
 
 #if !defined(_LP64)
@@ -431,29 +482,37 @@ void AUControl::CocoaViewResized()
 
    [mAUView setFrameSize:viewSize];
 
+   SetMinSize(wxSize(viewSize.width, viewSize.height));;
+
    int diffW = (viewSize.width - frameSize.width);
    int diffH = (viewSize.height - frameSize.height);
 
    wxWindow *w = wxGetTopLevelParent(this);
 
    wxSize min = w->GetMinSize();
-   if ([mView autoresizingMask] == NSViewNotSizable)
+   if ([mView autoresizingMask] & (NSViewWidthSizable | NSViewHeightSizable))
+   {
+      min.x += diffW;
+      min.y += diffH;
+   }
+   else
    {
       min.x += (viewSize.width - mLastMin.GetWidth());
       min.y += (viewSize.height - mLastMin.GetHeight());
       mLastMin = wxSize(viewSize.width, viewSize.height);;
    }
-   else
-   {
-      min.x += diffW;
-      min.y += diffH;
-   }
    w->SetMinSize(min);
 
-   wxSize size = w->GetSize();
-   size.x += diffW;
-   size.y += diffH;
-   w->SetSize(size);
+   // Resize the dialog as well
+   w->Fit();
+
+   // Send a "dummy" event to have the OnSize() method recalc mView position
+   GetEventHandler()->AddPendingEvent(wxSizeEvent(GetSize()));
+}
+
+void AUControl::ForceRedraw()
+{
+   ((AUView *)mAUView)->mRedraw = YES;
 }
 
 #if !defined(_LP64)

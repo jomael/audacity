@@ -15,20 +15,26 @@ Paul Licameli
 
 #include "../Audacity.h"
 #include "WaveformPrefs.h"
+
 #include "GUIPrefs.h"
 #include "GUISettings.h"
 
 #include <wx/checkbox.h>
+#include <wx/choice.h>
 
 #include "../Project.h"
 
 #include "../TrackPanel.h"
 #include "../ShuttleGui.h"
 #include "../WaveTrack.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveTrackView.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveTrackViewConstants.h"
 
-WaveformPrefs::WaveformPrefs(wxWindow * parent, wxWindowID winid, WaveTrack *wt)
+WaveformPrefs::WaveformPrefs(wxWindow * parent, wxWindowID winid,
+   AudacityProject *pProject, WaveTrack *wt)
 /* i18n-hint: A waveform is a visual representation of vibration */
-: PrefsPanel(parent, winid, _("Waveforms"))
+: PrefsPanel(parent, winid, XO("Waveforms"))
+, mProject{ pProject }
 , mWt(wt)
 , mPopulating(false)
 {
@@ -50,6 +56,21 @@ WaveformPrefs::~WaveformPrefs()
 {
 }
 
+ComponentInterfaceSymbol WaveformPrefs::GetSymbol()
+{
+   return WAVEFORM_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString WaveformPrefs::GetDescription()
+{
+   return XO("Preferences for Waveforms");
+}
+
+wxString WaveformPrefs::HelpPageName()
+{
+   return "Waveform_Preferences";
+}
+
 enum {
    ID_DEFAULTS = 10001,
 
@@ -59,8 +80,6 @@ enum {
 
 void WaveformPrefs::Populate()
 {
-   mScaleChoices = WaveformSettings::GetScaleNames();
-
    // Reuse the same choices and codes as for Interface prefs
    GUIPrefs::GetRangeChoices(&mRangeChoices, &mRangeCodes);
 
@@ -78,27 +97,27 @@ void WaveformPrefs::PopulateOrExchange(ShuttleGui & S)
    S.SetBorder(2);
    S.StartScroller();
 
-   // S.StartStatic(_("Track Settings"));
+   // S.StartStatic(XO("Track Settings"));
    {
       mDefaultsCheckbox = 0;
       if (mWt) {
          /* i18n-hint: use is a verb */
-         mDefaultsCheckbox = S.Id(ID_DEFAULTS).TieCheckBox(_("&Use Preferences"), mDefaulted);
+         mDefaultsCheckbox = S.Id(ID_DEFAULTS).TieCheckBox(XO("&Use Preferences"), mDefaulted);
       }
 
-      S.StartStatic(_("Display"));
+      S.StartStatic(XO("Display"));
       {
          S.StartTwoColumn();
          {
             mScaleChoice =
-               S.Id(ID_SCALE).TieChoice(_("S&cale") + wxString(wxT(":")),
+               S.Id(ID_SCALE).TieChoice(XO("S&cale:"),
                   mTempSettings.scaleType,
-                  &mScaleChoices);
+                  Msgids( WaveformSettings::GetScaleNames() ) );
 
             mRangeChoice =
-               S.Id(ID_RANGE).TieChoice(_("Waveform dB &range") + wxString(wxT(":")),
+               S.Id(ID_RANGE).TieChoice(XO("Waveform dB &range:"),
                mTempSettings.dBRange,
-               &mRangeChoices);
+               mRangeChoices);
          }
          S.EndTwoColumn();
       }
@@ -107,7 +126,7 @@ void WaveformPrefs::PopulateOrExchange(ShuttleGui & S)
    // S.EndStatic();
 
    /*
-   S.StartStatic(_("Global settings"));
+   S.StartStatic(XO("Global settings"));
    {
    }
    S.EndStatic();
@@ -140,12 +159,6 @@ bool WaveformPrefs::Commit()
 {
    const bool isOpenPage = this->IsShown();
 
-   const auto partner =
-      mWt ?
-            // Assume linked track is wave or null
-            static_cast<WaveTrack*>(mWt->GetLink())
-          : nullptr;
-
    ShuttleGui S(this, eIsGettingFromDialog);
    PopulateOrExchange(S);
 
@@ -153,41 +166,38 @@ bool WaveformPrefs::Commit()
    WaveformSettings::Globals::Get().SavePrefs();
 
    if (mWt) {
-      if (mDefaulted) {
-         mWt->SetWaveformSettings({});
-         if (partner)
-            partner->SetWaveformSettings({});
-      }
-      else {
-         WaveformSettings *pSettings =
-            &mWt->GetIndependentWaveformSettings();
-         *pSettings = mTempSettings;
-         if (partner) {
-            pSettings = &partner->GetIndependentWaveformSettings();
-            *pSettings = mTempSettings;
+      for (auto channel : TrackList::Channels(mWt)) {
+         if (mDefaulted)
+            channel->SetWaveformSettings({});
+         else {
+            WaveformSettings &settings =
+               channel->GetIndependentWaveformSettings();
+            settings = mTempSettings;
          }
       }
    }
 
+   WaveformSettings *const pSettings = &WaveformSettings::defaults();
    if (!mWt || mDefaulted) {
-      WaveformSettings *const pSettings =
-         &WaveformSettings::defaults();
       *pSettings = mTempSettings;
       pSettings->SavePrefs();
    }
+   pSettings->LoadPrefs(); // always; in case Globals changed
 
    mTempSettings.ConvertToEnumeratedDBRange();
 
    if (mWt && isOpenPage) {
-      mWt->SetDisplay(WaveTrack::Waveform);
-      if (partner)
-         partner->SetDisplay(WaveTrack::Waveform);
+      for (auto channel : TrackList::Channels(mWt))
+         WaveTrackView::Get( *channel )
+            .SetDisplay( WaveTrackViewConstants::Waveform );
    }
 
    if (isOpenPage) {
-      TrackPanel *const tp = ::GetActiveProject()->GetTrackPanel();
-      tp->UpdateVRulers();
-      tp->Refresh(false);
+      if ( mProject ) {
+         auto &tp = TrackPanel::Get( *mProject );
+         tp.UpdateVRulers();
+         tp.Refresh(false);
+      }
    }
 
    return true;
@@ -244,13 +254,23 @@ EVT_CHOICE(ID_RANGE, WaveformPrefs::OnControl)
 EVT_CHECKBOX(ID_DEFAULTS, WaveformPrefs::OnDefaults)
 END_EVENT_TABLE()
 
-WaveformPrefsFactory::WaveformPrefsFactory(WaveTrack *wt)
-: mWt(wt)
+PrefsPanel::Factory
+WaveformPrefsFactory(WaveTrack *wt)
 {
+   return [=](wxWindow *parent, wxWindowID winid, AudacityProject *pProject)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew WaveformPrefs(parent, winid, pProject, wt);
+   };
 }
-
-PrefsPanel *WaveformPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew WaveformPrefs(parent, winid, mWt);
+#if 0
+namespace{
+PrefsPanel::Registration sAttachment{ "Waveform",
+   WaveformPrefsFactory( nullptr ),
+   false,
+   // Register with an explicit ordering hint because this one is
+   // only conditionally compiled; and place it at a lower tree level
+   { "Tracks", { Registry::OrderingHint::Before, "Spectrum" } }
+};
 }
+#endif

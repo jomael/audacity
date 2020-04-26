@@ -9,10 +9,9 @@
 *******************************************************************//**
 
 \class PrefsPanel
-\brief Used within the PrefsDialog, classes derived from this class
-include AudioIOPrefs, BatchPrefs, DirectoriesPrefs, FileFormatPrefs,
-GUIPrefs, KeyConfigPrefs, MousePrefs, QualityPrefs, SpectrumPrefs and
-ThemePrefs.
+\brief Base class for a panel in the PrefsDialog.  Classes derived from 
+this class include BatchPrefs, DirectoriesPrefs, GUIPrefs, KeyConfigPrefs, 
+MousePrefs, QualityPrefs, SpectrumPrefs and ThemePrefs.
 
   The interface works like this: Each panel in the preferences dialog
   must derive from PrefsPanel. You must override Apply() with code
@@ -20,7 +19,7 @@ ThemePrefs.
   global preferences object gPrefs, and instructing the applicable parts
   of the program to re-read the preference options.
 
-  To actually add a the NEW panel, edit the PrefsDialog constructor
+  To actually add the new panel, edit the PrefsDialog constructor
   to append the panel to its list of panels.
 
 *//*******************************************************************/
@@ -28,11 +27,15 @@ ThemePrefs.
 #ifndef __AUDACITY_PREFS_PANEL__
 #define __AUDACITY_PREFS_PANEL__
 
-#include <wx/window.h>
-#include "../widgets/wxPanelWrapper.h"
+#include <functional>
+#include "../widgets/wxPanelWrapper.h" // to inherit
+#include "../include/audacity/ComponentInterface.h"
+#include "../commands/CommandManager.h"
 
 /* A few constants for an attempt at semi-uniformity */
 #define PREFS_FONT_SIZE     8
+
+#define BUILTIN_PREFS_PANEL_PREFIX wxT("Built-in PrefsPanel: ")
 
 /* these are spacing guidelines: ie. radio buttons should have a 5 pixel
  * border on each side */
@@ -40,12 +43,32 @@ ThemePrefs.
 #define TOP_LEVEL_BORDER       5
 #define GENERIC_CONTROL_BORDER 5
 
+class AudacityProject;
 class ShuttleGui;
 
-class PrefsPanel /* not final */ : public wxPanelWrapper
+class PrefsPanel /* not final */ : public wxPanelWrapper, ComponentInterface
 {
  public:
-   PrefsPanel(wxWindow * parent, wxWindowID winid, const wxString &title)
+   // \brief Type alias for factories such as GUIPrefsFactory that produce a
+   // PrefsPanel, used by the Preferences dialog in a treebook.
+   // The project pointer may be null.  Usually it's not needed because
+   // preferences are global.  But sometimes you need a project, such as to
+   // preview the preference changes for spectrograms.
+   using Factory =
+      std::function< PrefsPanel * (
+         wxWindow *parent, wxWindowID winid, AudacityProject *) >;
+
+   // Typically you make a static object of this type in the .cpp file that
+   // also implements the PrefsPanel subclass.
+   struct Registration final
+   {
+      Registration( const wxString &name, const Factory &factory,
+         bool expanded = true,
+         const Registry::Placement &placement = { wxEmptyString, {} });
+   };
+
+   PrefsPanel(wxWindow * parent,
+      wxWindowID winid, const TranslatableString &title)
    :  wxPanelWrapper(parent, winid)
    {
       SetLabel(title);     // Provide visual label
@@ -58,6 +81,15 @@ class PrefsPanel /* not final */ : public wxPanelWrapper
    virtual void Preview() {} // Make tentative changes
    virtual bool Commit() = 0; // used to be called "Apply"
 
+
+   virtual PluginPath GetPath();
+   virtual VendorSymbol GetVendor();
+   virtual wxString GetVersion();
+
+   //virtual ComponentInterfaceSymbol GetSymbol();
+   //virtual wxString GetDescription();
+
+
    // If it returns True, the Preview button is added below the panel
    // Default returns false
    virtual bool ShowsPreviewButton();
@@ -68,13 +100,6 @@ class PrefsPanel /* not final */ : public wxPanelWrapper
    virtual wxString HelpPageName();
 
    virtual void Cancel();
-};
-
-class PrefsPanelFactory /* not final */
-{
-public:
-   // Precondition: parent != NULL
-   virtual PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) = 0;
 };
 
 #endif

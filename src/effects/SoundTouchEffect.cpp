@@ -12,18 +12,41 @@ effect that uses SoundTouch to do its processing (ChangeTempo
 
 **********************************************************************/
 
-#include "../Audacity.h"
+#include "../Audacity.h" // for USE_* macros
 
 #if USE_SOUNDTOUCH
+#include "SoundTouchEffect.h"
 
 #include <math.h>
 
 #include "../LabelTrack.h"
 #include "../WaveTrack.h"
-#include "../Project.h"
-#include "SoundTouchEffect.h"
-#include "TimeWarper.h"
 #include "../NoteTrack.h"
+
+// Soundtouch defines these as well, which are also in generated configmac.h
+// and configunix.h, so get rid of them before including,
+// to avoid compiler warnings, and be sure to do this
+// after all other #includes, to avoid any mischief that might result
+// from doing the un-definitions before seeing any wx headers.
+#undef PACKAGE_NAME
+#undef PACKAGE_STRING
+#undef PACKAGE_TARNAME
+#undef PACKAGE_VERSION
+#undef PACKAGE_BUGREPORT
+#undef PACKAGE
+#undef VERSION
+#include "SoundTouch.h"
+
+#ifdef USE_MIDI
+EffectSoundTouch::EffectSoundTouch()
+{
+   mSemitones = 0;
+}
+#endif
+
+EffectSoundTouch::~EffectSoundTouch()
+{
+}
 
 bool EffectSoundTouch::ProcessLabelTrack(
    LabelTrack *lt, const TimeWarper &warper)
@@ -57,40 +80,32 @@ bool EffectSoundTouch::ProcessWithTimeWarper(const TimeWarper &warper)
    }
 
    //Iterate over each track
-   // Needs Track::All for sync-lock grouping.
-   this->CopyInputTracks(Track::All);
+   // Needs all for sync-lock grouping.
+   this->CopyInputTracks(true);
    bool bGoodResult = true;
 
-   TrackListIterator iter(mOutputTracks.get());
-   Track* t;
    mCurTrackNum = 0;
    m_maxNewLength = 0.0;
 
-   t = iter.First();
-   while (t != NULL) {
-      if (t->GetKind() == Track::Label &&
-            (t->GetSelected() || (mustSync && t->IsSyncLockSelected())) )
-      {
-         if (!ProcessLabelTrack(static_cast<LabelTrack*>(t), warper))
-         {
+   mOutputTracks->Leaders().VisitWhile( bGoodResult,
+      [&]( LabelTrack *lt, const Track::Fallthrough &fallthrough ) {
+         if ( !(lt->GetSelected() || (mustSync && lt->IsSyncLockSelected())) )
+            return fallthrough();
+         if (!ProcessLabelTrack(lt, warper))
             bGoodResult = false;
-            break;
-         }
-      }
+      },
 #ifdef USE_MIDI
-      else if (t->GetKind() == Track::Note &&
-               (t->GetSelected() || (mustSync && t->IsSyncLockSelected())))
-      {
-         if (!ProcessNoteTrack(static_cast<NoteTrack*>(t), warper))
-         {
+      [&]( NoteTrack *nt, const Track::Fallthrough &fallthrough ) {
+         if ( !(nt->GetSelected() || (mustSync && nt->IsSyncLockSelected())) )
+            return fallthrough();
+         if (!ProcessNoteTrack(nt, warper))
             bGoodResult = false;
-            break;
-         }
-      }
+      },
 #endif
-      else if (t->GetKind() == Track::Wave && t->GetSelected())
-      {
-         WaveTrack* leftTrack = (WaveTrack*)t;
+      [&]( WaveTrack *leftTrack, const Track::Fallthrough &fallthrough ) {
+         if (!leftTrack->GetSelected())
+            return fallthrough();
+
          //Get start and end times from track
          mCurT0 = leftTrack->GetStartTime();
          mCurT1 = leftTrack->GetEndTime();
@@ -103,10 +118,13 @@ bool EffectSoundTouch::ProcessWithTimeWarper(const TimeWarper &warper)
          // Process only if the right marker is to the right of the left marker
          if (mCurT1 > mCurT0) {
 
-            if (leftTrack->GetLinked()) {
+            // TODO: more-than-two-channels
+            auto channels = TrackList::Channels(leftTrack);
+            auto rightTrack = (channels.size() > 1)
+               ? * ++ channels.first
+               : nullptr;
+            if ( rightTrack ) {
                double t;
-               // Assume linked track is wave
-               WaveTrack* rightTrack = static_cast<WaveTrack*>(iter.Next());
 
                //Adjust bounds by the right tracks markers
                t = rightTrack->GetStartTime();
@@ -125,10 +143,7 @@ bool EffectSoundTouch::ProcessWithTimeWarper(const TimeWarper &warper)
 
                //ProcessStereo() (implemented below) processes a stereo track
                if (!ProcessStereo(leftTrack, rightTrack, start, end, warper))
-               {
                   bGoodResult = false;
-                  break;
-               }
                mCurTrackNum++; // Increment for rightTrack, too.
             } else {
                //Transform the marker timepoints to samples
@@ -140,21 +155,17 @@ bool EffectSoundTouch::ProcessWithTimeWarper(const TimeWarper &warper)
 
                //ProcessOne() (implemented below) processes a single track
                if (!ProcessOne(leftTrack, start, end, warper))
-               {
                   bGoodResult = false;
-                  break;
-               }
             }
          }
          mCurTrackNum++;
+      },
+      [&]( Track *t ) {
+         if (mustSync && t->IsSyncLockSelected()) {
+            t->SyncLockAdjust(mT1, warper.Warp(mT1));
+         }
       }
-      else if (mustSync && t->IsSyncLockSelected()) {
-         t->SyncLockAdjust(mT1, warper.Warp(mT1));
-      }
-
-      //Iterate to the next track
-      t = iter.Next();
-   }
+   );
 
    if (bGoodResult)
       ReplaceProcessedTracks(bGoodResult);
@@ -178,7 +189,7 @@ bool EffectSoundTouch::ProcessOne(WaveTrack *track,
 {
    mSoundTouch->setSampleRate((unsigned int)(track->GetRate()+0.5));
 
-   auto outputTrack = mFactory->NewWaveTrack(track->GetSampleFormat(), track->GetRate());
+   auto outputTrack = track->EmptyCopy();
 
    //Get the length of the buffer (as double). len is
    //used simple to calculate a progress meter, so it is easier
@@ -236,7 +247,7 @@ bool EffectSoundTouch::ProcessOne(WaveTrack *track,
 
    // Take the output track and insert it in place of the original
    // sample data
-   track->ClearAndPaste(mCurT0, mCurT1, outputTrack.get(), true, false, &warper);
+   track->ClearAndPaste(mCurT0, mCurT1, outputTrack.get(), false, true, &warper);
 
    double newLength = outputTrack->GetEndTime();
    m_maxNewLength = wxMax(m_maxNewLength, newLength);
@@ -251,10 +262,8 @@ bool EffectSoundTouch::ProcessStereo(
 {
    mSoundTouch->setSampleRate((unsigned int)(leftTrack->GetRate() + 0.5));
 
-   auto outputLeftTrack = mFactory->NewWaveTrack(leftTrack->GetSampleFormat(),
-                                                       leftTrack->GetRate());
-   auto outputRightTrack = mFactory->NewWaveTrack(rightTrack->GetSampleFormat(),
-                                                        rightTrack->GetRate());
+   auto outputLeftTrack = leftTrack->EmptyCopy();
+   auto outputRightTrack = rightTrack->EmptyCopy();
 
    //Get the length of the buffer (as double). len is
    //used simple to calculate a progress meter, so it is easier
@@ -334,9 +343,9 @@ bool EffectSoundTouch::ProcessStereo(
    // Take the output tracks and insert in place of the original
    // sample data.
    leftTrack->ClearAndPaste(
-      mCurT0, mCurT1, outputLeftTrack.get(), true, false, &warper);
+      mCurT0, mCurT1, outputLeftTrack.get(), false, true, &warper);
    rightTrack->ClearAndPaste(
-      mCurT0, mCurT1, outputRightTrack.get(), true, false, &warper);
+      mCurT0, mCurT1, outputRightTrack.get(), false, true, &warper);
 
    // Track the longest result length
    double newLength = outputLeftTrack->GetEndTime();

@@ -22,9 +22,11 @@
 *//*******************************************************************/
 
 #include "../Audacity.h"
-
 #include "AButton.h"
+
 #include "../AColor.h"
+
+#include <wx/setup.h> // for wxUSE_* macros
 
 #include <wx/app.h>
 #include <wx/dcclient.h>
@@ -36,7 +38,87 @@
 
 //This is needed for tooltips
 #include "../Project.h"
+#include "../ProjectStatus.h"
+#include "../ProjectWindowBase.h"
 #include <wx/tooltip.h>
+
+#if wxUSE_ACCESSIBILITY
+#include "WindowAccessible.h"
+
+class AButtonAx final : public WindowAccessible
+{
+public:
+   AButtonAx(wxWindow * window);
+
+   virtual ~ AButtonAx();
+
+   // Performs the default action. childId is 0 (the action for this object)
+   // or > 0 (the action for a child).
+   // Return wxACC_NOT_SUPPORTED if there is no default action for this
+   // window (e.g. an edit control).
+   wxAccStatus DoDefaultAction(int childId) override;
+
+   // Retrieves the address of an IDispatch interface for the specified child.
+   // All objects must support this property.
+   wxAccStatus GetChild(int childId, wxAccessible** child) override;
+
+   // Gets the number of children.
+   wxAccStatus GetChildCount(int* childCount) override;
+
+   // Gets the default action for this object (0) or > 0 (the action for a child).
+   // Return wxACC_OK even if there is no action. actionName is the action, or the empty
+   // string if there is no action.
+   // The retrieved string describes the action that is performed on an object,
+   // not what the object does as a result. For example, a toolbar button that prints
+   // a document has a default action of "Press" rather than "Prints the current document."
+   wxAccStatus GetDefaultAction(int childId, wxString *actionName) override;
+
+   // Returns the description for this object or a child.
+   wxAccStatus GetDescription(int childId, wxString *description) override;
+
+   // Gets the window with the keyboard focus.
+   // If childId is 0 and child is NULL, no object in
+   // this subhierarchy has the focus.
+   // If this object has the focus, child should be 'this'.
+   wxAccStatus GetFocus(int *childId, wxAccessible **child) override;
+
+   // Returns help text for this object or a child, similar to tooltip text.
+   wxAccStatus GetHelpText(int childId, wxString *helpText) override;
+
+   // Returns the keyboard shortcut for this object or child.
+   // Return e.g. ALT+K
+   wxAccStatus GetKeyboardShortcut(int childId, wxString *shortcut) override;
+
+   // Returns the rectangle for this object (id = 0) or a child element (id > 0).
+   // rect is in screen coordinates.
+   wxAccStatus GetLocation(wxRect& rect, int elementId) override;
+
+   // Gets the name of the specified object.
+   wxAccStatus GetName(int childId, wxString *name) override;
+
+   // Returns a role constant.
+   wxAccStatus GetRole(int childId, wxAccRole *role) override;
+
+   // Gets a variant representing the selected children
+   // of this object.
+   // Acceptable values:
+   // - a null variant (IsNull() returns TRUE)
+   // - a list variant (GetType() == wxT("list"))
+   // - an integer representing the selected child element,
+   //   or 0 if this object is selected (GetType() == wxT("long"))
+   // - a "void*" pointer to a wxAccessible child object
+   wxAccStatus GetSelections(wxVariant *selections) override;
+
+   // Returns a state constant.
+   wxAccStatus GetState(int childId, long* state) override;
+
+   // Returns a localized string representing the value for the object
+   // or child.
+   wxAccStatus GetValue(int childId, wxString* strValue) override;
+
+};
+
+#endif // wxUSE_ACCESSIBILITY
 
 BEGIN_EVENT_TABLE(AButton, wxWindow)
    EVT_MOUSE_EVENTS(AButton::OnMouseEvent)
@@ -190,8 +272,8 @@ void AButton::Init(wxWindow * parent,
    mFocusRect = GetClientRect().Deflate( 3, 3 );
    mForceFocusRect = false;
 
-   SetSizeHints(mImages[0].mArr[0].GetMinSize(),
-                mImages[0].mArr[0].GetMaxSize());
+   SetMinSize(mImages[0].mArr[0].GetMinSize());
+   SetMaxSize(mImages[0].mArr[0].GetMaxSize());
 
 #if wxUSE_ACCESSIBILITY
    SetName( wxT("") );
@@ -202,6 +284,16 @@ void AButton::Init(wxWindow * parent,
 void AButton::UseDisabledAsDownHiliteImage(bool flag)
 {
    mUseDisabledAsDownHiliteImage = flag;
+}
+
+void AButton::SetToolTip( const TranslatableString &toolTip )
+{
+   wxWindow::SetToolTip( toolTip.Stripped().Translation() );
+}
+
+void AButton::SetLabel( const TranslatableString &toolTip )
+{
+   wxWindow::SetLabel( toolTip.Stripped().Translation() );
 }
 
 // This compensates for a but in wxWidgets 3.0.2 for mac:
@@ -364,7 +456,7 @@ void AButton::OnMouseEvent(wxMouseEvent & event)
       // to make it pop up when we want it.
       auto text = GetToolTipText();
       UnsetToolTip();
-      SetToolTip(text);
+      wxWindow::SetToolTip(text);
       mCursorIsInWindow = true;
    }
    else if (event.Leaving())
@@ -375,7 +467,7 @@ void AButton::OnMouseEvent(wxMouseEvent & event)
           event.m_x < clientSize.x && event.m_y < clientSize.y);
 
    if (mEnabled && event.IsButton()) {
-      if (event.ButtonIsDown(wxMOUSE_BTN_ANY)) {
+      if (event.ButtonIsDown(wxMOUSE_BTN_LEFT)) {
          mIsClicking = true;
          if (event.ButtonDClick())
             mIsDoubleClicked = true;
@@ -411,7 +503,9 @@ void AButton::OnMouseEvent(wxMouseEvent & event)
       if (mCursorIsInWindow)
          UpdateStatus();
       else {
-         GetActiveProject()->TP_DisplayStatusMessage(wxT(""));
+         auto pProject = FindProjectFromWindow( this );
+         if (pProject)
+            ProjectStatus::Get( *pProject ).Set({});
       }
    }
    else
@@ -425,10 +519,12 @@ void AButton::UpdateStatus()
       // Display the tooltip in the status bar
       wxToolTip * pTip = this->GetToolTip();
       if( pTip ) {
-         wxString tipText = pTip->GetTip();
+         auto tipText = Verbatim( pTip->GetTip() );
          if (!mEnabled)
-            tipText += _(" (disabled)");
-         GetActiveProject()->TP_DisplayStatusMessage(tipText);
+            tipText.Join( XO("(disabled)"), " " );
+         auto pProject = FindProjectFromWindow( this );
+         if (pProject)
+            ProjectStatus::Get( *pProject ).Set( tipText );
       }
 #endif
    }
@@ -494,9 +590,11 @@ bool AButton::WasControlDown()
 
 void AButton::Enable()
 {
-   wxWindow::Enable(true);
-   mEnabled = true;
-   Refresh(false);
+   bool changed = wxWindow::Enable(true);
+   if ( !mEnabled ) {
+      mEnabled = true;
+      Refresh(false);
+   }
 }
 
 void AButton::Disable()
@@ -508,10 +606,12 @@ void AButton::Disable()
 #ifndef __WXMSW__
    wxWindow::Enable(false);
 #endif
-   mEnabled = false;
    if (GetCapture()==this)
       ReleaseMouse();
-   Refresh(false);
+   if ( mEnabled ) {
+      mEnabled = false;
+      Refresh(false);
+   }
 }
 
 void AButton::PushDown()
@@ -627,7 +727,7 @@ wxAccStatus AButtonAx::GetDefaultAction(int WXUNUSED(childId), wxString* actionN
 // Returns the description for this object or a child.
 wxAccStatus AButtonAx::GetDescription( int WXUNUSED(childId), wxString *description )
 {
-   description->Clear();
+   description->clear();
 
    return wxACC_OK;
 }
@@ -658,7 +758,7 @@ wxAccStatus AButtonAx::GetHelpText( int WXUNUSED(childId), wxString *helpText )
 
    return wxACC_OK;
 #else
-   helpText->Clear();
+   helpText->clear();
 
    return wxACC_NOT_SUPPORTED;
 #endif
@@ -668,7 +768,7 @@ wxAccStatus AButtonAx::GetHelpText( int WXUNUSED(childId), wxString *helpText )
 // Return e.g. ALT+K
 wxAccStatus AButtonAx::GetKeyboardShortcut( int WXUNUSED(childId), wxString *shortcut )
 {
-   shortcut->Clear();
+   shortcut->clear();
 
    return wxACC_OK;
 }
@@ -691,12 +791,12 @@ wxAccStatus AButtonAx::GetName(int WXUNUSED(childId), wxString* name)
    AButton *ab = wxDynamicCast( GetWindow(), AButton );
 
    *name = ab->GetName();
-   if( name->IsEmpty() )
+   if( name->empty() )
    {
       *name = ab->GetLabel();
    }
 
-   if( name->IsEmpty() )
+   if( name->empty() )
    {
       *name = _("Button");
    }

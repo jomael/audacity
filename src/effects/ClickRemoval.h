@@ -16,28 +16,25 @@
 #ifndef __AUDACITY_EFFECT_CLICK_REMOVAL__
 #define __AUDACITY_EFFECT_CLICK_REMOVAL__
 
-#include <wx/event.h>
-#include <wx/slider.h>
-#include <wx/string.h>
-#include <wx/textctrl.h>
-
 #include "Effect.h"
 
+class wxSlider;
+class wxTextCtrl;
 class Envelope;
 class ShuttleGui;
-
-#define CLICKREMOVAL_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Click Removal") }
 
 class EffectClickRemoval final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectClickRemoval();
    virtual ~EffectClickRemoval();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
    wxString ManualPage() override;
 
    // EffectDefinitionInterface implementation

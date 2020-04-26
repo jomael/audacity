@@ -44,7 +44,7 @@
 
 #include "audacity/Types.h"
 #include "audacity/ConfigInterface.h"
-#include "audacity/IdentInterface.h"
+#include "audacity/ComponentInterface.h"
 
 // ============================================================================
 //
@@ -54,7 +54,7 @@
 
 class ImporterHostInterface;
 class ImporterClientInterface;
-class ImporterInterface : public IdentInterface
+class ImporterInterface : public ComponentInterface
 {
 public:
    virtual ~ImporterInterface() {};
@@ -67,13 +67,13 @@ public:
 
    // Get a description of the file type this importer can import.
    // Examples: "Ogg Vorbis", "MP3", "Uncompressed PCM"
-   virtual wxString GetPluginFormatDescription() = 0;
+   virtual TranslatableString GetPluginFormatDescription() = 0;
 
    // Get a list of extensions this plugin expects to be able to
    // import.  If a filename matches any of these extensions,
    // this importer will get first dibs on importing it.
-   virtual wxArrayString GetSupportedExtensions() = 0;
-   virtual bool SupportsExtension(const wxString & extension) = 0;
+   virtual FileExtensions GetSupportedExtensions() = 0;
+   virtual bool SupportsExtension(const FileExtension & extension) = 0;
 
    // Create the client that will be used to import a file.
    virtual ImporterClientInterface *CreateClient() = 0;
@@ -134,7 +134,7 @@ public:
    // This is similar to GetImporterDescription, but if possible the
    // importer will return a more specific description of the
    // specific file that is open.
-   virtual wxString GetFileDescription() = 0;
+   virtual TranslatableString GetFileDescription() = 0;
 
    // Return stream descriptions list
    virtual void GetStreamInfo(wxArrayString & streamInfo) = 0;

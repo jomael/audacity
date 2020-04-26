@@ -13,11 +13,9 @@ Paul Licameli
 
 #include "../../UIHandle.h"
 
-#include "../../MemoryX.h"
-
 #include "../../Snap.h"
-#include "../../Track.h"
 
+class ViewInfo;
 class WaveClip;
 
 struct ClipMoveState {
@@ -30,6 +28,8 @@ struct ClipMoveState {
    TrackClipArray capturedClipArray {};
    wxInt64 snapLeft { -1 }, snapRight { -1 };
 
+   int mMouseClickX{};
+
    void clear()
    {
       capturedClip = nullptr;
@@ -38,6 +38,7 @@ struct ClipMoveState {
       hSlideAmount = 0;
       capturedClipArray.clear();
       snapLeft = snapRight = -1;
+      mMouseClickX = 0;
    }
 };
 
@@ -65,6 +66,14 @@ public:
    static void DoSlideHorizontal
       ( ClipMoveState &state, TrackList &trackList, Track &capturedTrack );
 
+   // Try to move clips from one WaveTrack to another, before also moving
+   // by some horizontal amount, which may be slightly adjusted to fit the
+   // destination tracks.
+   static bool DoSlideVertical
+      ( ViewInfo &viewInfo, wxCoord xx,
+        ClipMoveState &state, TrackList &trackList, Track &capturedTrack,
+        Track &dstTrack, double &desiredSlideAmount );
+
    static UIHandlePtr HitAnywhere
       (std::weak_ptr<TimeShiftHandle> &holder,
        const std::shared_ptr<Track> &pTrack, bool gripHit);
@@ -75,7 +84,7 @@ public:
 
    virtual ~TimeShiftHandle();
 
-   void Enter(bool forward) override;
+   void Enter(bool forward, AudacityProject *) override;
 
    Result Click
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
@@ -84,7 +93,7 @@ public:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release
@@ -93,13 +102,18 @@ public:
 
    Result Cancel(AudacityProject *pProject) override;
 
-   void DrawExtras
-      (DrawingPass pass,
-       wxDC * dc, const wxRegion &, const wxRect &panelRect) override;
-
    bool StopsOnKeystroke() override { return true; }
 
 private:
+   // TrackPanelDrawable implementation
+   void Draw(
+      TrackPanelDrawingContext &context,
+      const wxRect &rect, unsigned iPass ) override;
+
+   wxRect DrawingArea(
+      TrackPanelDrawingContext &,
+      const wxRect &rect, const wxRect &panelRect, unsigned iPass ) override;
+
    std::shared_ptr<Track> mCapturedTrack;
    wxRect mRect{};
 
@@ -107,8 +121,6 @@ private:
    bool mSlideUpDownOnly{};
 
    bool mSnapPreferRightEdge{};
-
-   int mMouseClickX{};
 
    // Handles snapping the selection boundaries or track boundaries to
    // line up with existing tracks or labels.  mSnapLeft and mSnapRight

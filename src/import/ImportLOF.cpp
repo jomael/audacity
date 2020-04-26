@@ -69,8 +69,7 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
-#include "ImportLOF.h"
+#include "../Audacity.h" // for USE_* macros
 
 #include <wx/string.h>
 #include <wx/utils.h>
@@ -81,22 +80,25 @@
 #ifdef USE_MIDI
 #include "ImportMIDI.h"
 #endif // USE_MIDI
+#include "../FileNames.h"
 #include "../WaveTrack.h"
 #include "ImportPlugin.h"
 #include "Import.h"
 #include "../NoteTrack.h"
 #include "../Project.h"
+#include "../ProjectHistory.h"
+#include "../ProjectManager.h"
+#include "../ProjectWindow.h"
 #include "../FileFormats.h"
 #include "../Prefs.h"
-#include "../Internat.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
+#include "../widgets/ProgressDialog.h"
 
 #define BINARY_FILE_CHECK_BUFFER_SIZE 1024
 
-#define DESC _("List of Files in basic text format")
+#define DESC XO("List of Files in basic text format")
 
-static const wxChar *exts[] =
-{
+static const auto exts = {
    wxT("lof")
 };
 
@@ -104,34 +106,36 @@ class LOFImportPlugin final : public ImportPlugin
 {
 public:
    LOFImportPlugin()
-   :  ImportPlugin(wxArrayString(WXSIZEOF(exts), exts))
+   :  ImportPlugin( FileExtensions( exts.begin(), exts.end() ) )
    {
    }
 
    ~LOFImportPlugin() { }
 
-   wxString GetPluginStringID() { return wxT("lof"); }
-   wxString GetPluginFormatDescription();
-   std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
+   wxString GetPluginStringID() override { return wxT("lof"); }
+   TranslatableString GetPluginFormatDescription() override;
+   std::unique_ptr<ImportFileHandle> Open(
+      const FilePath &Filename, AudacityProject *pProject) override;
 };
 
 
 class LOFImportFileHandle final : public ImportFileHandle
 {
 public:
-   LOFImportFileHandle(const wxString & name, std::unique_ptr<wxTextFile> &&file);
+   LOFImportFileHandle( AudacityProject *pProject,
+      const FilePath & name, std::unique_ptr<wxTextFile> &&file);
    ~LOFImportFileHandle();
 
-   wxString GetFileDescription() override;
+   TranslatableString GetFileDescription() override;
    ByteCount GetFileUncompressedBytes() override;
    ProgressResult Import(TrackFactory *trackFactory, TrackHolders &outTracks,
               Tags *tags) override;
 
    wxInt32 GetStreamCount() override { return 1; }
 
-   const wxArrayString &GetStreamInfo() override
+   const TranslatableStrings &GetStreamInfo() override
    {
-      static wxArrayString empty;
+      static TranslatableStrings empty;
       return empty;
    }
 
@@ -146,7 +150,7 @@ private:
    std::unique_ptr<wxTextFile> mTextFile;
    wxFileName mLOFFileName;  /**< The name of the LOF file, which is used to
                                 interpret relative paths in it */
-   AudacityProject *mProject{ GetActiveProject() };
+   AudacityProject *mProject{};
 
    // In order to know whether or not to create a NEW window
    bool              windowCalledOnce{ false };
@@ -160,26 +164,22 @@ private:
    double            scrollOffset{ 0 };
 };
 
-LOFImportFileHandle::LOFImportFileHandle
-   (const wxString & name, std::unique_ptr<wxTextFile> &&file)
-:  ImportFileHandle(name),
-   mTextFile(std::move(file))
+LOFImportFileHandle::LOFImportFileHandle( AudacityProject *pProject,
+   const FilePath & name, std::unique_ptr<wxTextFile> &&file)
+:  ImportFileHandle(name)
+   , mTextFile(std::move(file))
    , mLOFFileName{name}
+   , mProject{ pProject }
 {
 }
 
-void GetLOFImportPlugin(ImportPluginList &importPluginList,
-                        UnusableImportPluginList & WXUNUSED(unusableImportPluginList))
-{
-   importPluginList.push_back( make_movable<LOFImportPlugin>() );
-}
-
-wxString LOFImportPlugin::GetPluginFormatDescription()
+TranslatableString LOFImportPlugin::GetPluginFormatDescription()
 {
     return DESC;
 }
 
-std::unique_ptr<ImportFileHandle> LOFImportPlugin::Open(const wxString &filename)
+std::unique_ptr<ImportFileHandle> LOFImportPlugin::Open(
+   const FilePath &filename, AudacityProject *pProject)
 {
    // Check if it is a binary file
    {
@@ -210,10 +210,11 @@ std::unique_ptr<ImportFileHandle> LOFImportPlugin::Open(const wxString &filename
    if (!file->IsOpened())
       return nullptr;
 
-   return std::make_unique<LOFImportFileHandle>(filename, std::move(file));
+   return std::make_unique<LOFImportFileHandle>(
+      pProject, filename, std::move(file));
 }
 
-wxString LOFImportFileHandle::GetFileDescription()
+TranslatableString LOFImportFileHandle::GetFileDescription()
 {
    return DESC;
 }
@@ -223,8 +224,9 @@ auto LOFImportFileHandle::GetFileUncompressedBytes() -> ByteCount
    return 0;
 }
 
-ProgressResult LOFImportFileHandle::Import(TrackFactory * WXUNUSED(trackFactory), TrackHolders &outTracks,
-                                Tags * WXUNUSED(tags))
+ProgressResult LOFImportFileHandle::Import(
+   TrackFactory * WXUNUSED(trackFactory), TrackHolders &outTracks,
+   Tags * WXUNUSED(tags))
 {
    // Unlike other ImportFileHandle subclasses, this one never gives any tracks
    // back to the caller.
@@ -268,21 +270,30 @@ ProgressResult LOFImportFileHandle::Import(TrackFactory * WXUNUSED(trackFactory)
    return ProgressResult::Success;
 }
 
-static int CountNumTracks(AudacityProject *proj)
+static Importer::RegisteredImportPlugin registered{ "LOF",
+   std::make_unique< LOFImportPlugin >()
+};
+
+#ifdef USE_MIDI
+// return null on failure; if success, return the given project, or a NEW
+// one, if the given was null; create no NEW project if failure
+static AudacityProject *DoImportMIDIProject(
+   AudacityProject *pProject, const FilePath &fileName)
 {
-   int count = 0;
-   Track *t;
-   TrackListIterator iter(proj->GetTracks());
-
-   t = iter.First();
-
-   while(t) {
-      count++;
-      t = iter.Next();
+   AudacityProject *pNewProject {};
+   if ( !pProject )
+      pProject = pNewProject = ProjectManager::New();
+   auto cleanup = finally( [&]
+      { if ( pNewProject ) GetProjectFrame( *pNewProject ).Close(true); } );
+   
+   if ( DoImportMIDI( *pProject, fileName ) ) {
+      pNewProject = nullptr;
+      return pProject;
    }
-
-   return count;
+   else
+      return nullptr;
 }
+#endif
 
 /** @brief Processes a single line from a LOF text file, doing whatever is
  * indicated on the line.
@@ -330,10 +341,12 @@ void LOFImportFileHandle::lofOpenFiles(wxString* ln)
             }
             else
             {
-               /* i18n-hint: You do not need to translate "LOF" */
-               AudacityMessageBox(_("Invalid window offset in LOF file."),
-                            /* i18n-hint: You do not need to translate "LOF" */
-                            _("LOF Error"), wxOK | wxCENTRE);
+               AudacityMessageBox(
+                  /* i18n-hint: You do not need to translate "LOF" */
+                  XO("Invalid window offset in LOF file."),
+                  /* i18n-hint: You do not need to translate "LOF" */
+                  XO("LOF Error"),
+                  wxOK | wxCENTRE);
             }
 
             if (tok.HasMoreTokens())
@@ -351,14 +364,16 @@ void LOFImportFileHandle::lofOpenFiles(wxString* ln)
             }
             else
             {
-               /* i18n-hint: You do not need to translate "LOF" */
-               AudacityMessageBox(_("Invalid duration in LOF file."),
-                            /* i18n-hint: You do not need to translate "LOF" */
-                            _("LOF Error"), wxOK | wxCENTRE);
+               AudacityMessageBox(
+                  /* i18n-hint: You do not need to translate "LOF" */
+                  XO("Invalid duration in LOF file."),
+                  /* i18n-hint: You do not need to translate "LOF" */
+                  XO("LOF Error"),
+                  wxOK | wxCENTRE);
             }
          }     // End if statement
 
-         if (tokenholder.IsSameAs(wxT("#")))
+         if (tokenholder == wxT("#"))
          {
             // # indicates comments; ignore line
             tok = wxStringTokenizer(wxT(""), wxT(" "));
@@ -387,9 +402,9 @@ void LOFImportFileHandle::lofOpenFiles(wxString* ln)
 
 #ifdef USE_MIDI
       // If file is a midi
-      if (Importer::IsMidi(targetfile))
+      if (FileNames::IsMidi(targetfile))
       {
-         mProject = AudacityProject::DoImportMIDI(mProject, targetfile);
+         mProject = DoImportMIDIProject(mProject, targetfile);
       }
 
       // If not a midi, open audio file
@@ -400,7 +415,7 @@ void LOFImportFileHandle::lofOpenFiles(wxString* ln)
           * audio file. TODO: Some sort of message here? */
 
 #endif // USE_MIDI
-         mProject = AudacityProject::OpenProject( mProject, targetfile );
+         mProject = ProjectManager::OpenProject( mProject, targetfile );
 
       // Set tok to right after filename
       temptok2.SetString(targettoken);
@@ -413,7 +428,7 @@ void LOFImportFileHandle::lofOpenFiles(wxString* ln)
       {
          tokenholder = tok.GetNextToken();
 
-         if (tokenholder.IsSameAs(wxT("#")))
+         if (tokenholder == wxT("#"))
          {
             // # indicates comments; ignore line
             tok = wxStringTokenizer(wxT(""), wxT(" "));
@@ -432,54 +447,47 @@ void LOFImportFileHandle::lofOpenFiles(wxString* ln)
                ;
             else if (Internat::CompatibleToDouble(tokenholder, &offset))
             {
-               Track *t;
-               TrackListIterator iter(mProject->GetTracks());
-
-               t = iter.First();
-
-               for (int i = 1; i < CountNumTracks(mProject) - 1; i++)
-                  t = iter.Next();
+               auto &tracks = TrackList::Get( *mProject );
+               auto t = *tracks.Leaders().rbegin();
 
                // t is now the last track in the project, unless the import of
                // all tracks failed, in which case it will be null. In that
                // case we return because we cannot offset a non-existent track.
-               if (t == NULL) return;
+               if (t == NULL)
+                  return;
 #ifdef USE_MIDI
                if (targetfile.AfterLast(wxT('.')).IsSameAs(wxT("mid"), false) ||
                    targetfile.AfterLast(wxT('.')).IsSameAs(wxT("midi"), false))
                {
-                  AudacityMessageBox(_("MIDI tracks cannot be offset individually, only audio files can be."),
-                               _("LOF Error"), wxOK | wxCENTRE);
+                  AudacityMessageBox(
+                     XO("MIDI tracks cannot be offset individually, only audio files can be."),
+                     XO("LOF Error"),
+                     wxOK | wxCENTRE);
                }
                else
 #endif
                {
-                  if (CountNumTracks(mProject) == 1)
-                     t->SetOffset(offset);
-                  else
-                  {
-                     if (t->GetLinked())
-                        t->SetOffset(offset);
-
-                     t = iter.Next();
-                     t->SetOffset(offset);
-                  }
+                  for (auto channel : TrackList::Channels(t))
+                     channel->SetOffset(offset);
                }
 
                // Amend the undo transaction made by import
-               mProject->TP_ModifyState(false);
+               ProjectHistory::Get( *mProject ).ModifyState(false);
             } // end of converting "offset" argument
             else
             {
-               /* i18n-hint: You do not need to translate "LOF" */
-               AudacityMessageBox(_("Invalid track offset in LOF file."),
-                            _("LOF Error"), wxOK | wxCENTRE);
+               AudacityMessageBox(
+                  /* i18n-hint: You do not need to translate "LOF" */
+                  XO("Invalid track offset in LOF file."),
+                  /* i18n-hint: You do not need to translate "LOF" */
+                  XO("LOF Error"),
+                  wxOK | wxCENTRE);
             }
          }     // End if statement for "offset" parameters
       }     // End if statement (more tokens after file name)
    }     // End if statement "file" lines
 
-   else if (tokenholder.IsSameAs(wxT("#")))
+   else if (tokenholder == wxT("#"))
    {
       // # indicates comments; ignore line
       tok = wxStringTokenizer(wxT(""), wxT(" "));
@@ -498,20 +506,20 @@ void LOFImportFileHandle::doDurationAndScrollOffset()
    bool doSomething = callDurationFactor || callScrollOffset;
    if (callDurationFactor)
    {
-      double longestDuration = mProject->GetTracks()->GetEndTime();
-      mProject->ZoomBy(longestDuration / durationFactor);
+      double longestDuration = TrackList::Get( *mProject ).GetEndTime();
+      ProjectWindow::Get( *mProject ).ZoomBy(longestDuration / durationFactor);
       callDurationFactor = false;
    }
 
    if (callScrollOffset && (scrollOffset != 0))
    {
-      mProject->TP_ScrollWindow(scrollOffset);
+      ProjectWindow::Get( *mProject ).TP_ScrollWindow(scrollOffset);
       callScrollOffset = false;
    }
 
    if (doSomething)
       // Amend last undo state
-      mProject->TP_ModifyState(false);
+      ProjectHistory::Get( *mProject ).ModifyState(false);
 }
 
 LOFImportFileHandle::~LOFImportFileHandle()

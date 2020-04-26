@@ -11,11 +11,13 @@
 #ifndef __AUDACITY_LANGUAGES__
 #define __AUDACITY_LANGUAGES__
 
-#include <wx/arrstr.h>
-#include <wx/string.h>
-#include <wx/list.h>
+class wxArrayString;
+class wxString;
 
-void GetLanguages(wxArrayString &langCodes, wxArrayString &langNames);
+#include "audacity/Types.h"
+
+void GetLanguages(
+   wxArrayString &langCodes, TranslatableStrings &langNames);
 
 wxString GetSystemLanguageCode();
 

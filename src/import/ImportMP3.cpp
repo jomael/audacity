@@ -26,8 +26,7 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
-#include "ImportMP3.h"
+#include "../Audacity.h" // for USE_* macros
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
@@ -39,18 +38,16 @@
 #include <wx/defs.h>
 #include <wx/intl.h>
 
-#include "../AudacityException.h"
 #include "../Prefs.h"
 #include "Import.h"
 #include "ImportPlugin.h"
-#include "../Internat.h"
 #include "../Tags.h"
 #include "../prefs/QualityPrefs.h"
+#include "../widgets/ProgressDialog.h"
 
-#define DESC _("MP3 files")
+#define DESC XO("MP3 files")
 
-static const wxChar *exts[] =
-{
+static const auto exts = {
    wxT("mp3"),
    wxT("mp2"),
    wxT("mpa")
@@ -58,14 +55,10 @@ static const wxChar *exts[] =
 
 #ifndef USE_LIBMAD
 
-void GetMP3ImportPlugin(ImportPluginList &importPluginList,
-                        UnusableImportPluginList &unusableImportPluginList)
-{
-   unusableImportPluginList.push_back(
-      make_movable<UnusableImportPlugin>
-         (DESC, wxArrayString(WXSIZEOF(exts), exts))
-  );
-}
+static Importer::RegisteredUnusableImportPlugin registered{
+      std::make_unique<UnusableImportPlugin>
+         (DESC, FileExtensions( exts.begin(), exts.end() ) )
+};
 
 #else /* USE_LIBMAD */
 
@@ -77,6 +70,12 @@ void GetMP3ImportPlugin(ImportPluginList &importPluginList,
 #include <wx/timer.h>
 #include <wx/intl.h>
 
+#include "../WaveTrack.h"
+
+// PRL:  include these last,
+// and correct some preprocessor namespace pollution from wxWidgets that
+// caused a warning about duplicate definition
+#undef SIZEOF_LONG
 extern "C" {
 #include "mad.h"
 
@@ -84,8 +83,6 @@ extern "C" {
 #include <id3tag.h>
 #endif
 }
-
-#include "../WaveTrack.h"
 
 #define INPUT_BUFFER_SIZE 65535
 #define PROGRESS_SCALING_FACTOR 100000
@@ -98,7 +95,7 @@ struct private_data {
    ArrayOf<unsigned char> inputBuffer{ static_cast<unsigned int>(INPUT_BUFFER_SIZE) };
    int inputBufferFill;     /* amount of data in inputBuffer */
    TrackFactory *trackFactory;
-   TrackHolders channels;
+   NewChannelGroup channels;
    ProgressDialog *progress;
    unsigned numChannels;
    ProgressResult updateResult;
@@ -110,21 +107,22 @@ class MP3ImportPlugin final : public ImportPlugin
 {
 public:
    MP3ImportPlugin():
-      ImportPlugin(wxArrayString(WXSIZEOF(exts), exts))
+      ImportPlugin( FileExtensions( exts.begin(), exts.end() ) )
    {
    }
 
    ~MP3ImportPlugin() { }
 
    wxString GetPluginStringID() override { return wxT("libmad"); }
-   wxString GetPluginFormatDescription() override;
-   std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
+   TranslatableString GetPluginFormatDescription() override;
+   std::unique_ptr<ImportFileHandle> Open(
+      const FilePath &Filename, AudacityProject*) override;
 };
 
 class MP3ImportFileHandle final : public ImportFileHandle
 {
 public:
-   MP3ImportFileHandle(std::unique_ptr<wxFile> &&file, wxString filename):
+   MP3ImportFileHandle(std::unique_ptr<wxFile> &&file, const FilePath &filename):
       ImportFileHandle(filename),
       mFile(std::move(file))
    {
@@ -132,16 +130,16 @@ public:
 
    ~MP3ImportFileHandle();
 
-   wxString GetFileDescription() override;
+   TranslatableString GetFileDescription() override;
    ByteCount GetFileUncompressedBytes() override;
    ProgressResult Import(TrackFactory *trackFactory, TrackHolders &outTracks,
               Tags *tags) override;
 
    wxInt32 GetStreamCount() override { return 1; }
 
-   const wxArrayString &GetStreamInfo() override
+   const TranslatableStrings &GetStreamInfo() override
    {
-      static wxArrayString empty;
+      static TranslatableStrings empty;
       return empty;
    }
 
@@ -155,12 +153,6 @@ private:
    void *mUserData;
    mad_decoder mDecoder;
 };
-
-void GetMP3ImportPlugin(ImportPluginList &importPluginList,
-                        UnusableImportPluginList & WXUNUSED(unusableImportPluginList))
-{
-   importPluginList.push_back( make_movable<MP3ImportPlugin>() );
-}
 
 /* The MAD callbacks */
 enum mad_flow input_cb(void *_data, struct mad_stream *stream);
@@ -179,12 +171,13 @@ inline float scale(mad_fixed_t sample)
 }
 
 
-wxString MP3ImportPlugin::GetPluginFormatDescription()
+TranslatableString MP3ImportPlugin::GetPluginFormatDescription()
 {
    return DESC;
 }
 
-std::unique_ptr<ImportFileHandle> MP3ImportPlugin::Open(const wxString &Filename)
+std::unique_ptr<ImportFileHandle> MP3ImportPlugin::Open(
+   const FilePath &Filename, AudacityProject*)
 {
    auto file = std::make_unique<wxFile>(Filename);
 
@@ -197,7 +190,7 @@ std::unique_ptr<ImportFileHandle> MP3ImportPlugin::Open(const wxString &Filename
    return std::make_unique<MP3ImportFileHandle>(std::move(file), Filename);
 }
 
-wxString MP3ImportFileHandle::GetFileDescription()
+TranslatableString MP3ImportFileHandle::GetFileDescription()
 {
    return DESC;
 }
@@ -208,8 +201,9 @@ auto MP3ImportFileHandle::GetFileUncompressedBytes() -> ByteCount
    return 0;
 }
 
-ProgressResult MP3ImportFileHandle::Import(TrackFactory *trackFactory, TrackHolders &outTracks,
-                                Tags *tags)
+ProgressResult MP3ImportFileHandle::Import(
+   TrackFactory *trackFactory, TrackHolders &outTracks,
+   Tags *tags)
 {
    outTracks.clear();
 
@@ -252,13 +246,18 @@ ProgressResult MP3ImportFileHandle::Import(TrackFactory *trackFactory, TrackHold
    for(const auto &channel : privateData.channels) {
       channel->Flush();
    }
-   outTracks.swap(privateData.channels);
+   if (!privateData.channels.empty())
+      outTracks.push_back(std::move(privateData.channels));
 
    /* Read in any metadata */
    ImportID3(tags);
 
    return privateData.updateResult;
 }
+
+static Importer::RegisteredImportPlugin registered{ "MP3",
+   std::make_unique< MP3ImportPlugin >()
+};
 
 MP3ImportFileHandle::~MP3ImportFileHandle()
 {
@@ -376,7 +375,7 @@ void MP3ImportFileHandle::ImportID3(Tags *tags)
          v = UTF8CTOWX(str.get());
       }
 
-      if (!n.IsEmpty() && !v.IsEmpty()) {
+      if (!n.empty() && !v.empty()) {
          tags->SetTag(n, v);
       }
    }
@@ -501,17 +500,9 @@ enum mad_flow output_cb(void *_data,
 
          auto format = QualityPrefs::SampleFormatChoice();
 
-         for(auto &channel: data->channels) {
+         for(auto &channel: data->channels)
             channel = data->trackFactory->NewWaveTrack(format, samplerate);
-            channel->SetChannel(Track::MonoChannel);
-         }
 
-         /* special case: 2 channels is understood to be stereo */
-         if(channels == 2) {
-            data->channels.begin()->get()->SetChannel(Track::LeftChannel);
-            data->channels.rbegin()->get()->SetChannel(Track::RightChannel);
-            data->channels.begin()->get()->SetLinked(true);
-         }
          data->numChannels = channels;
       }
       else {

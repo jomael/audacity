@@ -2,7 +2,7 @@
 
   Audacity: A Digital Audio Editor
 
-  ToolBar.cpp
+  ToolDock.cpp
 
   Dominic Mazzoni
   Shane T. Mueller
@@ -22,12 +22,15 @@
 *//**********************************************************************/
 
 #include "../Audacity.h"
+#include "ToolDock.h"
+
 #include <wx/tokenzr.h>
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
 
 #ifndef WX_PRECOMP
+#include <wx/dcclient.h>
 #include <wx/defs.h>
 #include <wx/event.h>
 #include <wx/gdicmn.h>
@@ -37,17 +40,12 @@
 #include <wx/window.h>
 #endif  /*  */
 
-#include "ToolManager.h"
-#include "ToolDock.h"
-
 #include <algorithm>
 
 #include "../AColor.h"
 #include "../AllThemeResources.h"
 #include "../ImageManipulation.h"
 #include "../Prefs.h"
-#include "../Project.h"
-#include "../Theme.h"
 #include "../widgets/AButton.h"
 #include "../widgets/Grabber.h"
 
@@ -147,22 +145,27 @@ void ToolBarConfiguration::Insert(ToolBar *bar, Position position)
 
       // Insert as a leaf, or as an internal node?
       if (adopt && position.adopt) {
-         // Existing child of parent become its grandchild
-
-         // TODO:  is it ever correct to adopt more than one, depending on
-         // heights?  Could an inserted tall bar adopt two short ones?
+         // Existing children of parent become grandchildren
 
          // Make NEW node
          Tree tree;
          tree.pBar = bar;
 
          // Do adoption
-         tree.children.push_back(Tree{});
-         auto &child = tree.children.back();
-         child.pBar = iter->pBar;
-         child.children.swap(iter->children);
+         const auto barHeight = bar->GetSize().GetY() + toolbarGap;
+         auto totalHeight = 0;
+         while (iter != pForest->end() &&
+            barHeight >=
+               (totalHeight += (iter->pBar->GetSize().GetY() + toolbarGap))) {
+            tree.children.push_back(Tree{});
+            auto &child = tree.children.back();
+            child.pBar = iter->pBar;
+            child.children.swap(iter->children);
+            iter = pForest->erase(iter);
+         }
 
          // Put the node in the tree
+         iter = pForest->insert(iter, Tree{});
          (*iter).swap(tree);
       }
       else
@@ -373,22 +376,23 @@ END_EVENT_TABLE()
 //
 // Constructor
 //
-ToolDock::ToolDock( ToolManager *manager, wxWindow *parent, int dockid ):
+ToolDock::ToolDock( wxEvtHandler *manager, wxWindow *parent, int dockid ):
    wxPanelWrapper( parent, dockid, wxDefaultPosition, parent->GetSize() )
 {
-   SetLabel( _( "ToolDock" ) );
-   SetName( _( "ToolDock" ) );
+   SetLabel( XO( "ToolDock" ) );
+   SetName( XO( "ToolDock" ) );
 
    // Init
    mManager = manager;
    memset(mBars, 0, sizeof(mBars)); // otherwise uninitialized
    SetBackgroundColour(theTheme.Colour( clrMedium ));
+   SetLayoutDirection(wxLayout_LeftToRight);
    // Use for testing gaps
    // SetOwnBackgroundColour( wxColour( 255, 0, 0 ) );
 }
 
 //
-// Destructer
+// Destructor
 //
 ToolDock::~ToolDock()
 {
@@ -434,11 +438,6 @@ void ToolDock::Dock( ToolBar *bar, bool deflate, ToolBarConfiguration::Position 
 
    // Inform toolbar of change
    bar->SetDocked( this, false );
-
-   // Rearrange our world
-   if (bar->IsVisible())
-      LayoutToolBars();
-   Updated();
 }
 
 // Initial docking of bars
@@ -452,6 +451,7 @@ void ToolDock::LoadConfig()
       // configuration
       Expose( bar->GetId(), true );
    }
+   Updated();
 }
 
 // A policy object for the skeleton routine below
@@ -695,14 +695,18 @@ void ToolDock::LayoutToolBars()
    };
    VisitLayout(sizeSetter, &mWrappedConfiguration);
 
-   // Set tab order
+   // Set tab order and layout internal controls.
    {
       ToolBar *lt{};
       for ( const auto &place : GetConfiguration() ) {
          auto ct = place.pTree->pBar;
-         if( lt )
+         if( lt ){
             ct->MoveAfterInTabOrder( lt );
+         }
          lt = ct;
+         // Bug 1371.
+         // After a dock size change, the toolbars may need relaying inside.
+         lt->Layout();
       }
    }
 
@@ -731,7 +735,7 @@ ToolBarConfiguration::Position
 
       void ModifySize
          (ToolBar *ct,
-          const wxRect &rect,
+          const wxRect &rectIn,
           ToolBarConfiguration::Position prevPosition,
           ToolBarConfiguration::Position position,
           wxSize &sz)
@@ -741,16 +745,16 @@ ToolBarConfiguration::Position
          // and is in the right place.
 
          // Does the location fall within this bar?
-         if (rect.Contains(point))
+         if (rectIn.Contains(point))
          {
             sz = tb->GetDockedSize();
             // Choose a position always, if there is a bar to displace.
             // Else, only if the fit is possible.
-            if (ct || (sz.x <= rect.width && sz.y <= rect.height)) {
+            if (ct || (sz.x <= rectIn.width && sz.y <= rectIn.height)) {
                // May choose current or previous.
                if (ct &&
-                   (sz.y < rect.height ||
-                    point.y < (rect.GetTop() + rect.GetBottom()) / 2))
+                   (sz.y < rectIn.height ||
+                    point.y < (rectIn.GetTop() + rectIn.GetBottom()) / 2))
                   // "Wedge" the bar into a crack alone, not adopting others,
                   // if either a short bar displaces a tall one, or else
                   // the displacing bar is at least at tall, but the pointer is
@@ -764,13 +768,13 @@ ToolBarConfiguration::Position
       }
 
       void Visit
-         (ToolBar *, wxPoint point)
+         (ToolBar *, wxPoint pointIn)
          override
       {
          if (result != ToolBarConfiguration::UnspecifiedPosition) {
             // If we've placed it, we're done.
-            rect.x = point.x;
-            rect.y = point.y;
+            rect.x = pointIn.x;
+            rect.y = pointIn.y;
             if (usedPrev)
                rect.y -= tb->GetDockedSize().GetHeight() / 2;
 
@@ -790,8 +794,8 @@ ToolBarConfiguration::Position
          if (result == ToolBarConfiguration::UnspecifiedPosition) {
             // Default of all other placements.
             result = finalPosition;
-            wxPoint point { finalRect.GetLeft(), finalRect.GetBottom() };
-            rect.SetPosition(point);
+            wxPoint point1 { finalRect.GetLeft(), finalRect.GetBottom() };
+            rect.SetPosition(point1);
          }
       }
 
@@ -841,10 +845,6 @@ void ToolDock::Expose( int type, bool show )
 
    // Make it (dis)appear
    t->Expose( show );
-
-   // Update the layout
-   LayoutToolBars();
-   Updated();
 }
 
 //

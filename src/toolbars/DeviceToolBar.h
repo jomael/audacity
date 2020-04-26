@@ -11,27 +11,30 @@
 #ifndef __AUDACITY_DEVICE_TOOLBAR__
 #define __AUDACITY_DEVICE_TOOLBAR__
 
-#include "../MemoryX.h"
 #include <vector>
 #include "ToolBar.h"
 
-class wxImage;
 class wxSize;
 class wxPoint;
 class wxChoice;
-class wxStaticText;
 struct DeviceSourceMap;
+
+class AudacityProject;
 
 class DeviceToolBar final : public ToolBar {
 
  public:
 
-   DeviceToolBar();
+   DeviceToolBar( AudacityProject &project );
    virtual ~DeviceToolBar();
+
+   static DeviceToolBar &Get( AudacityProject &project );
+   static const DeviceToolBar &Get( const AudacityProject &project );
 
    void Create(wxWindow * parent) override;
 
    void UpdatePrefs() override;
+   void UpdateSelectedPrefs( int ) override;
 
    void DeinitChildren();
    void Populate() override;
@@ -44,9 +47,9 @@ class DeviceToolBar final : public ToolBar {
    void OnChoice(wxCommandEvent & event);
 
    /// When the prefs don't exist this value is used.
-   /// It should be small enough to work on tiny screens
-   int GetInitialWidth()  override{ return 620; }
-   int GetMinToolbarWidth() override { return 200; }
+   /// 883 takes a complete row in the default initial size of Audacity.
+   int GetInitialWidth()  override{ return 883; }
+   int GetMinToolbarWidth() override { return 350; }
 
    void ShowInputDialog();
    void ShowOutputDialog();
@@ -56,6 +59,8 @@ class DeviceToolBar final : public ToolBar {
    void RefillCombos();
 
  private:
+   void OnRescannedDevices( wxCommandEvent& );
+
    int  ChangeHost();
    void ChangeDevice(bool isInput);
    void FillHosts();
@@ -65,7 +70,7 @@ class DeviceToolBar final : public ToolBar {
    void RepositionCombos();
    void SetNames();
    void RegenerateTooltips() override;
-   void ShowComboDialog(wxChoice *combo, const wxString &title);
+   void ShowComboDialog(wxChoice *combo, const TranslatableString &title);
 
    wxChoice *mInput;
    wxChoice *mOutput;

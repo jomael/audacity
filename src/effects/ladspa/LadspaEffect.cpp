@@ -23,17 +23,24 @@ effects from this one class.
 
 
 #include "../../Audacity.h"
-
-#include "ladspa.h"
+#include "LadspaEffect.h"       // This class's header file
 
 #include <float.h>
 
+#if !defined(__WXMSW__)
+#include <dlfcn.h>
+
+#ifndef RTLD_DEEPBIND
+#define RTLD_DEEPBIND 0
+#endif
+#endif
+
+#include <wx/setup.h> // for wxUSE_* macros
 #include <wx/wxprec.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/dcbuffer.h>
 #include <wx/dcclient.h>
-#include <wx/dynlib.h>
 #include <wx/filename.h>
 #include <wx/log.h>
 #include <wx/menu.h>
@@ -47,10 +54,9 @@ effects from this one class.
 #include <wx/scrolwin.h>
 #include <wx/version.h>
 
-#include "LadspaEffect.h"       // This class's header file
 #include "../../FileNames.h"
-#include "../../Internat.h"
 #include "../../ShuttleGui.h"
+#include "../../widgets/NumericTextCtrl.h"
 #include "../../widgets/valnum.h"
 #include "../../widgets/wxPanelWrapper.h"
 
@@ -108,23 +114,23 @@ LadspaEffectsModule::~LadspaEffectsModule()
 }
 
 // ============================================================================
-// IdentInterface implementation
+// ComponentInterface implementation
 // ============================================================================
 
-wxString LadspaEffectsModule::GetPath()
+PluginPath LadspaEffectsModule::GetPath()
 {
    return mPath;
 }
 
-IdentInterfaceSymbol LadspaEffectsModule::GetSymbol()
+ComponentInterfaceSymbol LadspaEffectsModule::GetSymbol()
 {
-   /* i8n-hint: abbreviates "Linux Audio Developer's Simple Plugin API"
+   /* i18n-hint: abbreviates "Linux Audio Developer's Simple Plugin API"
       (Application programming interface)
     */
    return XO("LADSPA Effects");
 }
 
-IdentInterfaceSymbol LadspaEffectsModule::GetVendor()
+VendorSymbol LadspaEffectsModule::GetVendor()
 {
    return XO("The Audacity Team");
 }
@@ -135,9 +141,9 @@ wxString LadspaEffectsModule::GetVersion()
    return LADSPAEFFECTS_VERSION;
 }
 
-wxString LadspaEffectsModule::GetDescription()
+TranslatableString LadspaEffectsModule::GetDescription()
 {
-   return _("Provides LADSPA Effects");
+   return XO("Provides LADSPA Effects");
 }
 
 // ============================================================================
@@ -156,31 +162,39 @@ void LadspaEffectsModule::Terminate()
    return;
 }
 
-wxArrayString LadspaEffectsModule::FileExtensions()
+EffectFamilySymbol LadspaEffectsModule::GetOptionalFamilySymbol()
 {
-   static const wxString ext[] = {
+#if USE_LADSPA
+   return LADSPAEFFECTS_FAMILY;
+#else
+   return {};
+#endif
+}
+
+const FileExtensions &LadspaEffectsModule::GetFileExtensions()
+{
+   static FileExtensions result{{
 
 #ifdef __WXMSW__
 
-      { _T("dll") }
+      _T("dll")
 
 #else
 
-      { _T("so") }
+      _T("so")
 
    #ifdef __WXMAC__
    // Is it correct that these are candidate plug-in files too for macOs?
-      , { _T("dylib") }
+      , _T("dylib")
    #endif
 
 #endif
 
-   };
-   static const wxArrayString result{ sizeof(ext)/sizeof(*ext), ext };
+   }};
    return result;
 }
 
-wxString LadspaEffectsModule::InstallPath()
+FilePath LadspaEffectsModule::InstallPath()
 {
    // To do: better choice
    return FileNames::PlugInDir();
@@ -190,15 +204,15 @@ bool LadspaEffectsModule::AutoRegisterPlugins(PluginManagerInterface & pm)
 {
    // Autoregister effects that we "think" are ones that have been shipped with
    // Audacity.  A little simplistic, but it should suffice for now.
-   wxArrayString pathList = GetSearchPaths();
-   wxArrayString files;
-   wxString ignoredErrMsg;
+   auto pathList = GetSearchPaths();
+   FilePaths files;
+   TranslatableString ignoredErrMsg;
 
    for (int i = 0; i < (int)WXSIZEOF(kShippedEffects); i++)
    {
-      files.Clear();
+      files.clear();
       pm.FindFilesInPathList(kShippedEffects[i], pathList, files);
-      for (size_t j = 0, cnt = files.GetCount(); j < cnt; j++)
+      for (size_t j = 0, cnt = files.size(); j < cnt; j++)
       {
          if (!pm.IsPluginRegistered(files[j]))
          {
@@ -213,10 +227,10 @@ bool LadspaEffectsModule::AutoRegisterPlugins(PluginManagerInterface & pm)
    return false;
 }
 
-wxArrayString LadspaEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
+PluginPaths LadspaEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
 {
-   wxArrayString pathList = GetSearchPaths();
-   wxArrayString files;
+   auto pathList = GetSearchPaths();
+   FilePaths files;
 
 #if defined(__WXMAC__)
 
@@ -235,19 +249,19 @@ wxArrayString LadspaEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
 
 #endif
 
-   return files;
+   return { files.begin(), files.end() };
 }
 
 unsigned LadspaEffectsModule::DiscoverPluginsAtPath(
-   const wxString & path, wxString &errMsg,
+   const PluginPath & path, TranslatableString &errMsg,
    const RegistrationCallback &callback)
 {
-   errMsg.clear();
+   errMsg = {};
    // Since we now have builtin VST support, ignore the VST bridge as it
    // causes duplicate menu entries to appear.
    wxFileName ff(path);
    if (ff.GetName().CmpNoCase(wxT("vst-bridge")) == 0) {
-      errMsg = _("Audacity no longer uses vst-bridge");
+      errMsg = XO("Audacity no longer uses vst-bridge");
       return 0;
    }
 
@@ -263,11 +277,18 @@ unsigned LadspaEffectsModule::DiscoverPluginsAtPath(
    int index = 0;
    int nLoaded = 0;
    LADSPA_Descriptor_Function mainFn = NULL;
+#if defined(__WXMSW__)
    wxDynamicLibrary lib;
    if (lib.Load(path, wxDL_NOW)) {
       wxLogNull logNo;
 
       mainFn = (LADSPA_Descriptor_Function) lib.GetSymbol(wxT("ladspa_descriptor"));
+#else
+   void *lib = dlopen((const char *)path.ToUTF8(), RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND);
+   if (lib) {
+      mainFn = (LADSPA_Descriptor_Function) dlsym(lib, "ladspa_descriptor");
+#endif
+
       if (mainFn) {
          const LADSPA_Descriptor *data;
 
@@ -279,13 +300,14 @@ unsigned LadspaEffectsModule::DiscoverPluginsAtPath(
                   callback( this, &effect );
             }
             else
-               errMsg = _("Could not load the library");
+               errMsg = XO("Could not load the library");
          }
       }
    }
    else
-      errMsg = _("Could not load the library");
+      errMsg = XO("Could not load the library");
 
+#if defined(__WXMSW__)
    if (lib.IsLoaded()) {
       // PRL:  I suspect Bug1257 -- Crash when enabling Amplio2 -- is the fault of a timing-
       // dependent multi-threading bug in the Amplio2 library itself, in case the unload of the .dll
@@ -294,6 +316,11 @@ unsigned LadspaEffectsModule::DiscoverPluginsAtPath(
       ::wxMilliSleep(10);
       lib.Unload();
    }
+#else
+   if (lib) {
+      dlclose(lib);
+   }
+#endif
 
    wxSetWorkingDirectory(saveOldCWD);
    hadpath ? wxSetEnv(wxT("PATH"), envpath) : wxUnsetEnv(wxT("PATH"));
@@ -301,7 +328,7 @@ unsigned LadspaEffectsModule::DiscoverPluginsAtPath(
    return nLoaded;
 }
 
-bool LadspaEffectsModule::IsPluginValid(const wxString & path, bool bFast)
+bool LadspaEffectsModule::IsPluginValid(const PluginPath & path, bool bFast)
 {
    if( bFast )
       return true;
@@ -309,7 +336,7 @@ bool LadspaEffectsModule::IsPluginValid(const wxString & path, bool bFast)
    return wxFileName::FileExists(realPath);
 }
 
-IdentInterface *LadspaEffectsModule::CreateInstance(const wxString & path)
+ComponentInterface *LadspaEffectsModule::CreateInstance(const PluginPath & path)
 {
    // Acquires a resource for the application.
    // For us, the path is two words.
@@ -323,17 +350,16 @@ IdentInterface *LadspaEffectsModule::CreateInstance(const wxString & path)
    return safenew LadspaEffect(realPath, (int)index);
 }
 
-void LadspaEffectsModule::DeleteInstance(IdentInterface *instance)
+void LadspaEffectsModule::DeleteInstance(ComponentInterface *instance)
 {
    std::unique_ptr < LadspaEffect > {
       dynamic_cast<LadspaEffect *>(instance)
    };
 }
 
-wxArrayString LadspaEffectsModule::GetSearchPaths()
+FilePaths LadspaEffectsModule::GetSearchPaths()
 {
-   wxArrayString pathList;
-   wxArrayString files;
+   FilePaths pathList;
    wxString pathVar;
 
    // Check for the LADSPA_PATH environment variable
@@ -343,7 +369,7 @@ wxArrayString LadspaEffectsModule::GetSearchPaths()
       wxStringTokenizer tok(pathVar);
       while (tok.HasMoreTokens())
       {
-         pathList.Add(tok.GetNextToken());
+         pathList.push_back(tok.GetNextToken());
       }
    }
 
@@ -351,19 +377,23 @@ wxArrayString LadspaEffectsModule::GetSearchPaths()
 #define LADSPAPATH wxT("/Library/Audio/Plug-Ins/LADSPA")
 
    // Look in ~/Library/Audio/Plug-Ins/LADSPA and /Library/Audio/Plug-Ins/LADSPA
-   pathList.Add(wxGetHomeDir() + wxFILE_SEP_PATH + LADSPAPATH);
-   pathList.Add(LADSPAPATH);
+   pathList.push_back(wxGetHomeDir() + wxFILE_SEP_PATH + LADSPAPATH);
+   pathList.push_back(LADSPAPATH);
 
 #elif defined(__WXMSW__)
 
    // No special paths...probably should look in %CommonProgramFiles%\LADSPA
 
 #else
-   
-   pathList.Add(wxGetHomeDir() + wxFILE_SEP_PATH + wxT(".ladspa"));
-   pathList.Add(wxT("/usr/local/lib/ladspa"));
-   pathList.Add(wxT("/usr/lib/ladspa"));
-   pathList.Add(wxT(LIBDIR) wxT("/ladspa"));
+
+   pathList.push_back(wxGetHomeDir() + wxFILE_SEP_PATH + wxT(".ladspa"));
+#if defined(__LP64__)
+   pathList.push_back(wxT("/usr/local/lib64/ladspa"));
+   pathList.push_back(wxT("/usr/lib64/ladspa"));
+#endif
+   pathList.push_back(wxT("/usr/local/lib/ladspa"));
+   pathList.push_back(wxT("/usr/lib/ladspa"));
+   pathList.push_back(wxT(LIBDIR) wxT("/ladspa"));
 
 #endif
 
@@ -398,7 +428,7 @@ BEGIN_EVENT_TABLE(LadspaEffectOptionsDialog, wxDialogWrapper)
 END_EVENT_TABLE()
 
 LadspaEffectOptionsDialog::LadspaEffectOptionsDialog(wxWindow * parent, EffectHostInterface *host)
-:  wxDialogWrapper(parent, wxID_ANY, wxString(_("LADSPA Effect Options")))
+:  wxDialogWrapper(parent, wxID_ANY, XO("LADSPA Effect Options"))
 {
    mHost = host;
 
@@ -419,18 +449,19 @@ void LadspaEffectOptionsDialog::PopulateOrExchange(ShuttleGui & S)
    {
       S.StartVerticalLay(false);
       {
-         S.StartStatic(_("Latency Compensation"));
+         S.StartStatic(XO("Latency Compensation"));
          {
-            S.AddVariableText(wxString() +
-               _("As part of their processing, some LADSPA effects must delay returning ") +
-               _("audio to Audacity. When not compensating for this delay, you will ") +
-               _("notice that small silences have been inserted into the audio. ") +
-               _("Enabling this option will provide that compensation, but it may ") +
-               _("not work for all LADSPA effects."))->Wrap(650);
+            S.AddVariableText( XO(
+"As part of their processing, some LADSPA effects must delay returning "
+"audio to Audacity. When not compensating for this delay, you will "
+"notice that small silences have been inserted into the audio. "
+"Enabling this option will provide that compensation, but it may "
+"not work for all LADSPA effects."),
+               false, 0, 650);
 
             S.StartHorizontalLay(wxALIGN_LEFT);
             {
-               S.TieCheckBox(_("Enable &compensation"),
+               S.TieCheckBox(XO("Enable &compensation"),
                              mUseLatency);
             }
             S.EndHorizontalLay();
@@ -520,8 +551,9 @@ LadspaEffectMeter::~LadspaEffectMeter()
 {
 }
 
-void LadspaEffectMeter::OnIdle(wxIdleEvent & WXUNUSED(evt))
+void LadspaEffectMeter::OnIdle(wxIdleEvent &evt)
 {
+   evt.Skip();
    if (mLastValue != mVal)
    {
       Refresh(false);
@@ -613,20 +645,20 @@ LadspaEffect::~LadspaEffect()
 }
 
 // ============================================================================
-// IdentInterface implementation
+// ComponentInterface implementation
 // ============================================================================
 
-wxString LadspaEffect::GetPath()
+PluginPath LadspaEffect::GetPath()
 {
    return wxString::Format(wxT("%s;%d"), mPath, mIndex);
 }
 
-IdentInterfaceSymbol LadspaEffect::GetSymbol()
+ComponentInterfaceSymbol LadspaEffect::GetSymbol()
 {
    return LAT1CTOWX(mData->Name);
 }
 
-IdentInterfaceSymbol LadspaEffect::GetVendor()
+VendorSymbol LadspaEffect::GetVendor()
 {
    return { LAT1CTOWX(mData->Maker) };
 }
@@ -636,9 +668,9 @@ wxString LadspaEffect::GetVersion()
    return _("n/a");
 }
 
-wxString LadspaEffect::GetDescription()
+TranslatableString LadspaEffect::GetDescription()
 {
-   return LAT1CTOWX(mData->Copyright);
+   return Verbatim( LAT1CTOWX(mData->Copyright) );
 }
 
 // ============================================================================
@@ -665,7 +697,7 @@ EffectType LadspaEffect::GetType()
    return EffectTypeProcess;
 }
 
-IdentInterfaceSymbol LadspaEffect::GetFamilyId()
+EffectFamilySymbol LadspaEffect::GetFamily()
 {
    return LADSPAEFFECTS_FAMILY;
 }
@@ -893,6 +925,11 @@ size_t LadspaEffect::SetBlockSize(size_t maxBlockSize)
    return mBlockSize;
 }
 
+size_t LadspaEffect::GetBlockSize() const
+{
+   return mBlockSize;
+}
+
 sampleCount LadspaEffect::GetLatency()
 {
    if (mUseLatency && mLatencyPort >= 0 && !mLatencyDone)
@@ -1033,7 +1070,8 @@ bool LadspaEffect::RealtimeProcessEnd()
    return true;
 }
 
-bool LadspaEffect::ShowInterface(wxWindow *parent, bool forceModal)
+bool LadspaEffect::ShowInterface(
+   wxWindow &parent, const EffectDialogFactory &factory, bool forceModal)
 {
    if (mDialog)
    {
@@ -1045,7 +1083,8 @@ bool LadspaEffect::ShowInterface(wxWindow *parent, bool forceModal)
    // mDialog is null
    auto cleanup = valueRestorer( mDialog );
 
-   mDialog = mHost->CreateUI(parent, this);
+   if ( factory )
+      mDialog = factory(parent, mHost, this);
    if (!mDialog)
    {
       return false;
@@ -1090,9 +1129,9 @@ bool LadspaEffect::SetAutomationParameters(CommandParameters & parms)
 {
    for (unsigned long p = 0; p < mData->PortCount; p++)
    {
-      LADSPA_PortDescriptor d = mData->PortDescriptors[p];
+      LADSPA_PortDescriptor descriptor = mData->PortDescriptors[p];
 
-      if (LADSPA_IS_PORT_CONTROL(d) && LADSPA_IS_PORT_INPUT(d))
+      if (LADSPA_IS_PORT_CONTROL(descriptor) && LADSPA_IS_PORT_INPUT(descriptor))
       {
          wxString labelText = LAT1CTOWX(mData->PortNames[p]);
          double d = 0.0;
@@ -1108,7 +1147,7 @@ bool LadspaEffect::SetAutomationParameters(CommandParameters & parms)
    return true;
 }
 
-bool LadspaEffect::LoadUserPreset(const wxString & name)
+bool LadspaEffect::LoadUserPreset(const RegistryPath & name)
 {
    if (!LoadParameters(name))
    {
@@ -1120,14 +1159,14 @@ bool LadspaEffect::LoadUserPreset(const wxString & name)
    return true;
 }
 
-bool LadspaEffect::SaveUserPreset(const wxString & name)
+bool LadspaEffect::SaveUserPreset(const RegistryPath & name)
 {
    return SaveParameters(name);
 }
 
-wxArrayString LadspaEffect::GetFactoryPresets()
+RegistryPaths LadspaEffect::GetFactoryPresets()
 {
-   return wxArrayString();
+   return {};
 }
 
 bool LadspaEffect::LoadFactoryPreset(int WXUNUSED(id))
@@ -1156,8 +1195,10 @@ void LadspaEffect::SetHostUI(EffectUIHostInterface *host)
    mUIHost = host;
 }
 
-bool LadspaEffect::PopulateUI(wxWindow *parent)
+bool LadspaEffect::PopulateUI(ShuttleGui &S)
 {
+   auto parent = S.GetParent();
+
    mParent = parent;
 
    mParent->PushEventHandler(this);
@@ -1214,7 +1255,7 @@ bool LadspaEffect::PopulateUI(wxWindow *parent)
                   mSampleRate,
                   NumericTextCtrl::Options{}
                      .AutoPos(true));
-            mDuration->SetName(_("Duration"));
+            mDuration->SetName( XO("Duration") );
             gridSizer->Add(mDuration, 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
             gridSizer->Add(1, 1, 0);
             gridSizer->Add(1, 1, 0);
@@ -1230,7 +1271,7 @@ bool LadspaEffect::PopulateUI(wxWindow *parent)
             }
 
             wxString labelText = LAT1CTOWX(mData->PortNames[p]);
-            item = safenew wxStaticText(w, 0, labelText + wxT(":"));
+            item = safenew wxStaticText(w, 0, wxString::Format(_("%s:"), labelText));
             gridSizer->Add(item, 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT | wxALL, 5);
 
             wxString fieldText;
@@ -1316,7 +1357,7 @@ bool LadspaEffect::PopulateUI(wxWindow *parent)
                gridSizer->Add(1, 1, 0);
             }
 
-            mSliders[p] = safenew wxSlider(w, ID_Sliders + p,
+            mSliders[p] = safenew wxSliderWrapper(w, ID_Sliders + p,
                0, 0, 1000,
                wxDefaultPosition,
                wxSize(200, -1));
@@ -1406,7 +1447,7 @@ bool LadspaEffect::PopulateUI(wxWindow *parent)
             }
 
             wxString labelText = LAT1CTOWX(mData->PortNames[p]);
-            item = safenew wxStaticText(w, 0, labelText + wxT(":"));
+            item = safenew wxStaticText(w, 0, wxString::Format(_("%s:"), labelText));
             gridSizer->Add(item, 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT | wxALL, 5);
 
             //LADSPA_PortRangeHint hint = mData->PortRangeHints[p];
@@ -1464,10 +1505,10 @@ bool LadspaEffect::PopulateUI(wxWindow *parent)
    // Try to give the window a sensible default/minimum size
    wxSize sz1 = marginSizer->GetMinSize();
    wxSize sz2 = mParent->GetMinSize();
-   w->SetSizeHints(wxSize(wxMin(sz1.x, sz2.x), wxMin(sz1.y, sz2.y)));
+   w->SetMinSize( { std::min(sz1.x, sz2.x), std::min(sz1.y, sz2.y) } );
 
    // And let the parent reduce to the NEW minimum if possible
-   mParent->SetSizeHints(-1, -1);
+   mParent->SetMinSize({ -1, -1 });
 
    return true;
 }
@@ -1592,7 +1633,7 @@ void LadspaEffect::Unload()
    }
 }
 
-bool LadspaEffect::LoadParameters(const wxString & group)
+bool LadspaEffect::LoadParameters(const RegistryPath & group)
 {
    wxString parms;
    if (!mHost->GetPrivateConfig(group, wxT("Parameters"), parms, wxEmptyString))
@@ -1609,7 +1650,7 @@ bool LadspaEffect::LoadParameters(const wxString & group)
    return SetAutomationParameters(eap);
 }
 
-bool LadspaEffect::SaveParameters(const wxString & group)
+bool LadspaEffect::SaveParameters(const RegistryPath & group)
 {
    CommandParameters eap;
    if (!GetAutomationParameters(eap))
@@ -1714,7 +1755,7 @@ void LadspaEffect::OnSlider(wxCommandEvent & evt)
 
 void LadspaEffect::OnTextCtrl(wxCommandEvent & evt)
 {
-   LadspaEffect *that = reinterpret_cast<LadspaEffect *>(this);
+   LadspaEffect *that = this;
    int p = evt.GetId() - ID_Texts;
 
    float val;

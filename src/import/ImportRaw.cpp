@@ -24,17 +24,14 @@ and sample size to help you importing data of an unknown format.
 #include "../Audacity.h"
 #include "ImportRaw.h"
 
-#include "Import.h"
-
 #include "../DirManager.h"
-#include "../FileException.h"
 #include "../FileFormats.h"
-#include "../Internat.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 #include "../UserException.h"
 #include "../WaveTrack.h"
 #include "../prefs/QualityPrefs.h"
+#include "../widgets/ProgressDialog.h"
 
 #include <cmath>
 #include <cstdio>
@@ -54,7 +51,6 @@ and sample size to help you importing data of an unknown format.
 #include <wx/timer.h>
 
 // #include "RawAudioGuess.h"
-#include "MultiFormatReader.h"
 #include "FormatClassifier.h"
 
 #include "sndfile.h"
@@ -107,13 +103,11 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
    sf_count_t offset = 0;
    double rate = 44100.0;
    double percent = 100.0;
-   TrackHolders channels;
+   TrackHolders results;
    auto updateResult = ProgressResult::Success;
 
    {
       SF_INFO sndInfo;
-      int result;
-
       unsigned numChannels = 0;
 
       try {
@@ -171,15 +165,17 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
          throw FileException{ FileException::Cause::Open, fileName };
       }
 
-      result = sf_command(sndFile.get(), SFC_SET_RAW_START_OFFSET, &offset, sizeof(offset));
-      if (result != 0) {
-         char str[1000];
-         sf_error_str(sndFile.get(), str, 1000);
-         wxPrintf("%s\n", str);
 
-         throw FileException{ FileException::Cause::Read, fileName };
+      {
+         int result = sf_command(sndFile.get(), SFC_SET_RAW_START_OFFSET, &offset, sizeof(offset));
+         if (result != 0) {
+            char str[1000];
+            sf_error_str(sndFile.get(), str, 1000);
+            wxPrintf("%s\n", str);
+
+            throw FileException{ FileException::Cause::Read, fileName };
+         }
       }
-
       SFCall<sf_count_t>(sf_seek, sndFile.get(), 0, SEEK_SET);
 
       auto totalFrames =
@@ -200,31 +196,17 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
           sf_subtype_more_than_16_bits(encoding))
          format = floatSample;
 
+      results.resize(1);
+      auto &channels = results[0];
       channels.resize(numChannels);
 
-      auto iter = channels.begin();
-      for (decltype(numChannels) c = 0; c < numChannels; ++iter, ++c) {
-         const auto channel =
-         (*iter = trackFactory->NewWaveTrack(format, rate)).get();
-
-         if (numChannels > 1)
-            switch (c) {
-               case 0:
-                  channel->SetChannel(Track::LeftChannel);
-                  break;
-               case 1:
-                  channel->SetChannel(Track::RightChannel);
-                  break;
-               default:
-                  channel->SetChannel(Track::MonoChannel);
-            }
+      {
+         // iter not used outside this scope.
+         auto iter = channels.begin();
+         for (decltype(numChannels) c = 0; c < numChannels; ++iter, ++c)
+            *iter = trackFactory->NewWaveTrack(format, rate);
       }
-
       const auto firstChannel = channels.begin()->get();
-      if (numChannels == 2) {
-         firstChannel->SetLinked(true);
-      }
-
       auto maxBlockSize = firstChannel->GetMaxBlockSize();
 
       SampleBuffer srcbuffer(maxBlockSize * numChannels, format);
@@ -236,26 +218,24 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
          totalFrames = 0;
       }
 
-      wxString msg;
-
-      msg.Printf(_("Importing %s"), wxFileName::FileName(fileName).GetFullName());
+      auto msg = XO("Importing %s").Format( wxFileName::FileName(fileName).GetFullName() );
 
       /* i18n-hint: 'Raw' means 'unprocessed' here and should usually be tanslated.*/
-      ProgressDialog progress(_("Import Raw"), msg);
+      ProgressDialog progress(XO("Import Raw"), msg);
 
       size_t block;
       do {
          block =
             limitSampleBufferSize( maxBlockSize, totalFrames - framescompleted );
 
-         sf_count_t result;
+         sf_count_t sf_result;
          if (format == int16Sample)
-            result = SFCall<sf_count_t>(sf_readf_short, sndFile.get(), (short *)srcbuffer.ptr(), block);
+            sf_result = SFCall<sf_count_t>(sf_readf_short, sndFile.get(), (short *)srcbuffer.ptr(), block);
          else
-            result = SFCall<sf_count_t>(sf_readf_float, sndFile.get(), (float *)srcbuffer.ptr(), block);
+            sf_result = SFCall<sf_count_t>(sf_readf_float, sndFile.get(), (float *)srcbuffer.ptr(), block);
 
-         if (result >= 0) {
-            block = result;
+         if (sf_result >= 0) {
+            block = sf_result;
          }
          else {
             // This is not supposed to happen, sndfile.h says result is always
@@ -295,9 +275,11 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
    if (updateResult == ProgressResult::Failed || updateResult == ProgressResult::Cancelled)
       throw UserException{};
 
-   for (const auto &channel : channels)
-      channel->Flush();
-   outTracks.swap(channels);
+   if (!results.empty() && !results[0].empty()) {
+      for (const auto &channel : results[0])
+         channel->Flush();
+      outTracks.swap(results);
+   }
 }
 
 //
@@ -319,7 +301,7 @@ END_EVENT_TABLE()
 ImportRawDialog::ImportRawDialog(wxWindow * parent,
                                  int encoding, unsigned channels,
                                  int offset, double rate)
-:  wxDialogWrapper(parent, wxID_ANY, _("Import Raw Data"),
+:  wxDialogWrapper(parent, wxID_ANY, XO("Import Raw Data"),
             wxDefaultPosition, wxDefaultSize,
             wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER),
     mEncoding(encoding),
@@ -329,12 +311,10 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
 {
    wxASSERT(channels >= 1);
 
-   SetName(GetTitle());
+   SetName();
 
    ShuttleGui S(this, eIsCreating);
-   wxArrayString encodings;
-   wxArrayString endians;
-   wxArrayString chans;
+   TranslatableStrings encodings;
    int num;
    int selection;
    int endian;
@@ -357,7 +337,7 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
 
       if (sf_format_check(&info)) {
          mEncodingSubtype[mNumEncodings] = subtype;
-         encodings.Add(sf_encoding_index_name(i));
+         encodings.push_back( Verbatim( sf_encoding_index_name(i) ) );
 
          if ((mEncoding & SF_FORMAT_SUBMASK) == subtype)
             selection = mNumEncodings;
@@ -366,18 +346,20 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
       }
    }
 
-   /* i18n-hint: Refers to byte-order.  Don't translate "endianness" if you don't
+   TranslatableStrings endians{
+      /* i18n-hint: Refers to byte-order.  Don't translate "endianness" if you don't
+          know the correct technical word. */
+      XO("No endianness") ,
+      /* i18n-hint: Refers to byte-order.  Don't translate this if you don't
        know the correct technical word. */
-   endians.Add(_("No endianness"));
-   /* i18n-hint: Refers to byte-order.  Don't translate this if you don't
-    know the correct technical word. */
-   endians.Add(_("Little-endian"));
-   /* i18n-hint: Refers to byte-order.  Don't translate this if you don't
-      know the correct technical word. */
-   endians.Add(_("Big-endian"));
-   /* i18n-hint: Refers to byte-order.  Don't translate "endianness" if you don't
-      know the correct technical word. */
-   endians.Add(_("Default endianness"));
+      XO("Little-endian") ,
+      /* i18n-hint: Refers to byte-order.  Don't translate this if you don't
+         know the correct technical word. */
+      XO("Big-endian") ,
+      /* i18n-hint: Refers to byte-order.  Don't translate "endianness" if you don't
+         know the correct technical word. */
+      XO("Default endianness") ,
+   };
 
    switch (mEncoding & (SF_FORMAT_ENDMASK))
    {
@@ -396,10 +378,12 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
          break;
    }
 
-   chans.Add(_("1 Channel (Mono)"));
-   chans.Add(_("2 Channels (Stereo)"));
+   TranslatableStrings chans{
+      XO("1 Channel (Mono)") ,
+      XO("2 Channels (Stereo)") ,
+   };
    for (i=2; i<16; i++) {
-      chans.Add(wxString::Format(_("%d Channels"), i + 1));
+      chans.push_back( XO("%d Channels").Format( i + 1 ) );
    }
 
    S.StartVerticalLay(false);
@@ -407,15 +391,15 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
       S.SetBorder(5);
       S.StartTwoColumn();
       {
-         mEncodingChoice = S.Id(ChoiceID).AddChoice(_("Encoding:"),
-                                                    encodings[selection],
-                                                    &encodings);
-         mEndianChoice = S.Id(ChoiceID).AddChoice(_("Byte order:"),
-                                                  endians[endian],
-                                                  &endians);
-         mChannelChoice = S.Id(ChoiceID).AddChoice(_("Channels:"),
-                                                   chans[mChannels-1],
-                                                   &chans);
+         mEncodingChoice = S.Id(ChoiceID).AddChoice(XO("Encoding:"),
+                                                    encodings,
+                                                    selection);
+         mEndianChoice = S.Id(ChoiceID).AddChoice(XO("Byte order:"),
+                                                  endians,
+                                                  endian);
+         mChannelChoice = S.Id(ChoiceID).AddChoice(XO("Channels:"),
+                                                   chans,
+                                                   mChannels - 1);
       }
       S.EndTwoColumn();
 
@@ -424,25 +408,25 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
       {
          // Offset text
          /* i18n-hint: (noun)*/
-         mOffsetText = S.AddTextBox(_("Start offset:"),
+         mOffsetText = S.AddTextBox(XO("Start offset:"),
                                     wxString::Format(wxT("%d"), mOffset),
                                     12);
-         S.AddUnits(_("bytes"));
+         S.AddUnits(XO("bytes"));
 
          // Percent text
-         mPercentText = S.AddTextBox(_("Amount to import:"),
+         mPercentText = S.AddTextBox(XO("Amount to import:"),
                                      wxT("100"),
                                      12);
-         S.AddUnits(_("%"));
+         S.AddUnits(XO("%"));
 
          // Rate text
          /* i18n-hint: (noun)*/
-         mRateText = S.AddTextBox(_("Sample rate:"),
+         mRateText = S.AddTextBox(XO("Sample rate:"),
                                   wxString::Format(wxT("%d"), (int)mRate),
                                   12);
          /* i18n-hint: This is the abbreviation for "Hertz", or
             cycles per second. */
-         S.AddUnits(_("Hz"));
+         S.AddUnits(XO("Hz"));
       }
       S.EndMultiColumn();
 

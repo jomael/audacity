@@ -14,6 +14,7 @@
 #include <wx/filedlg.h>
 #include <wx/font.h>
 #include <wx/fontdlg.h>
+#include <wx/menu.h>
 #include <wx/msgdlg.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
@@ -22,17 +23,20 @@
 #include <wx/textctrl.h>
 #include <wx/toolbar.h>
 
-#include "AudioIO.h"
+#include "AudioIOBase.h"
+#include "CommonCommandFlags.h"
 #include "LabelTrack.h"
 #include "ModuleManager.h"
 #include "Prefs.h"
 #include "Project.h"
 #include "ShuttleGui.h"
 #include "effects/EffectManager.h"
+#include "effects/EffectUI.h"
 #include "effects/nyquist/Nyquist.h"
 #include "../images/AudacityLogo.xpm"
 #include "../../src/commands/CommandContext.h"
-#include "widgets/ErrorDialog.h"
+#include "../../src/commands/CommandManager.h"
+#include "widgets/AudacityMessageBox.h"
 
 #include "NyqBench.h"
 
@@ -136,14 +140,29 @@ and replace the main project window with our own wxFrame.
 
 */
 
+namespace {
+CommandHandlerObject &findme(AudacityProject&)
+{
+   return *NyqBench::GetBench();
+}
+
+void RegisterMenuItems()
+{
+  // Get here only after the module version check passes
+   using namespace MenuTable;
+   static AttachedItem sAttachment{ wxT("Tools"),
+      ( FinderScope( findme ), Section( wxT("NyquistWorkBench"),
+         Command( wxT("NyqBench"), XO("&Nyquist Workbench..."),
+            static_cast<CommandFunctorPointer>(&NyqBench::ShowNyqBench),
+            AudioIONotBusyFlag())
+      ) )
+   };
+}
+}
+
 extern "C"
 {
    static NyqBench *gBench = NULL;
-
-   static CommandHandlerObject &findme(AudacityProject&)
-   {
-      return *NyqBench::GetBench();
-   }
 
    #ifdef _MSC_VER
       #define DLL_API _declspec(dllexport)
@@ -164,42 +183,22 @@ extern "C"
 
    extern int DLL_API ModuleDispatch(ModuleDispatchTypes type);
    // ModuleDispatch
-   // is called by Audacity to initialize/terminmate the module,
-   // and ask if it has anything for the menus.
+   // is called by Audacity to initialize/terminate the module
    int ModuleDispatch(ModuleDispatchTypes type){
       switch (type){
+         case ModuleInitialize:
+            RegisterMenuItems();
+            break;
          case AppQuiting: {
             //It is perfectly OK for gBench to be NULL.
             //Can happen if the menu item was never invoked.
             //wxASSERT(gBench != NULL);
             if (gBench) {
+               // be sure to do this while gPrefs still exists:
+               gBench->SavePrefs();
                gBench->Destroy();
                gBench = NULL;
             }
-         }
-         break;
-         case ProjectInitialized:
-         case MenusRebuilt:  {
-            AudacityProject *p = GetActiveProject();
-            wxASSERT(p != NULL);
-            CommandManager *c = p->GetCommandManager();
-            wxASSERT(c != NULL);
-
-            wxMenuBar * pBar = p->GetMenuBar();
-            wxASSERT(pBar != NULL );
-            wxMenu * pMenu = pBar->GetMenu( 9 );  // Menu 9 is the Tools Menu.
-            wxASSERT( pMenu != NULL );
-
-            c->SetCurrentMenu(pMenu);
-            c->AddSeparator();
-            c->SetDefaultFlags(AudioIONotBusyFlag, AudioIONotBusyFlag);
-            c->AddItem(wxT("NyqBench"),
-               _("&Nyquist Workbench..."),
-               true,
-               findme,
-               static_cast<CommandFunctorPointer>(&NyqBench::ShowNyqBench));
-
-            c->ClearCurrentMenu();
          }
          break;
          default:
@@ -867,6 +866,10 @@ NyqBench::NyqBench(wxWindow * parent)
 
 NyqBench::~NyqBench()
 {
+}
+
+void NyqBench::SavePrefs()
+{
    gPrefs->Write(wxT("NyqBench/Window/Maximized"), IsMaximized());
    if (!IsMaximized()) {
       wxRect r = GetRect();
@@ -991,7 +994,7 @@ void NyqBench::PopulateOrExchange(ShuttleGui & S)
 
       S.AddSpace(5, 1);
       S.Prop(true);
-      S.AddWindow(mSplitter, wxEXPAND);
+      S.Position(wxEXPAND).AddWindow(mSplitter);
       S.AddSpace(5, 1);
 
       mSplitter->SetMinSize(wxSize(600, 400));
@@ -1090,8 +1093,8 @@ void NyqBench::OnSave(wxCommandEvent & e)
 
    if (!mScript->SaveFile(mPath.GetFullPath()))
    {
-      AudacityMessageBox(_("Script was not saved."),
-                   _("Warning"),
+      AudacityMessageBox(XO("Script was not saved."),
+                   XO("Warning"),
                    wxICON_EXCLAMATION,
                    this);
       return;
@@ -1120,8 +1123,8 @@ void NyqBench::OnSaveAs(wxCommandEvent & e)
 
    if (!mScript->SaveFile(mPath.GetFullPath()))
    {
-      AudacityMessageBox(_("Script was not saved."),
-                   _("Warning"),
+      AudacityMessageBox(XO("Script was not saved."),
+                   XO("Warning"),
                    wxICON_EXCLAMATION,
                    this);
       return;
@@ -1402,7 +1405,7 @@ void NyqBench::OnGo(wxCommandEvent & e)
       mRunning = true;
       UpdateWindowUI();
 
-      p->DoEffect(ID, CommandContext(*p), 0);
+      EffectUI::DoEffect(ID, CommandContext(*p), 0);
 
       mRunning = false;
       UpdateWindowUI();
@@ -1495,8 +1498,8 @@ void NyqBench::OnFindDialog(wxFindDialogEvent & e)
    }
 
    if (pos == wxString::npos) {
-      AudacityMessageBox(_("No matches found"),
-                   _("Nyquist Effect Workbench"),
+      AudacityMessageBox(XO("No matches found"),
+                   XO("Nyquist Effect Workbench"),
                    wxOK | wxCENTER,
                    e.GetDialog());
 
@@ -1588,6 +1591,7 @@ void NyqBench::OnRunUpdate(wxUpdateUIEvent & e)
    wxToolBar *tbar = GetToolBar();
    wxMenuBar *mbar = GetMenuBar();
 
+   auto gAudioIO = AudioIOBase::Get();
    if (p && gAudioIO->IsBusy()) {
       mbar->Enable(ID_GO, false);
       mbar->Enable(ID_STOP, false);
@@ -1632,8 +1636,8 @@ bool NyqBench::Validate()
 {
    if (mScript->GetLastPosition() > 0 && mScript->IsModified()) {
       int ans;
-      ans = AudacityMessageBox(_("Code has been modified.  Are you sure?"),
-                         _("Warning"),
+      ans = AudacityMessageBox(XO("Code has been modified. Are you sure?"),
+                         XO("Warning"),
                          wxYES_NO | wxICON_QUESTION,
                          this);
       if (ans == wxNO) {

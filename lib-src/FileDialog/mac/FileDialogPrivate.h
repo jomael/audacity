@@ -14,9 +14,9 @@
 #ifndef _MAC_FILEDIALOG_H_
 #define _MAC_FILEDIALOG_H_
 
-#include <wx/choice.h>
-
 #include "../FileDialog.h"
+
+class wxChoice;
 
 //-------------------------------------------------------------------------
 // wxFileDialog
@@ -61,11 +61,12 @@ public:
     virtual int ShowModal();
 
 #if wxOSX_USE_COCOA
-    virtual void ShowWindowModal();
     virtual void ModalFinishedCallback(void* panel, int resultCode);
 #endif
 
     virtual bool SupportsExtraControl() const;
+
+    virtual void SetFileExtension(const wxString& extension);
     
     // implementation only
     
@@ -73,7 +74,6 @@ public:
     void DoViewResized(void* object);
     void DoSendFolderChangedEvent(void* panel, const wxString& path);
     void DoSendSelectionChangedEvent(void* panel);
-    wxString DoCaptureFilename(void* panel, const wxString& name);
 #endif
 
 protected:
@@ -97,7 +97,6 @@ protected:
     wxArrayString m_currentExtensions;
     WX_NSObject m_delegate;
     WX_NSObject m_sheetDelegate;
-    wxString m_noOverwritePromptFilename;
 #endif
 
 private:

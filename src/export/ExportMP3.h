@@ -14,16 +14,26 @@
 /* --------------------------------------------------------------------------*/
 
 #include "../MemoryX.h"
-class ExportPlugin;
+
+enum MP3RateMode : unsigned {
+   MODE_SET = 0,
+   MODE_VBR,
+   MODE_ABR,
+   MODE_CBR,
+};
+
+template< typename Enum > class EnumSetting;
+extern EnumSetting< MP3RateMode > MP3RateModeSetting;
+
+#if defined(__WXMSW__) || defined(__WXMAC__)
+#define MP3_EXPORT_BUILT_IN 1
+#endif
+
 class wxString;
 class wxWindow;
-/** Factory method New_ExportMP3() which creates a NEW ExportMP3 object and
- * returns a pointer to it. The rest of the class declaration is in ExportMP3.cpp
- */
-movable_ptr<ExportPlugin> New_ExportMP3();
 
 //----------------------------------------------------------------------------
-// Get MP3 library versioqn
+// Get MP3 library version
 //----------------------------------------------------------------------------
 wxString GetMP3Version(wxWindow *parent, bool prompt);
 

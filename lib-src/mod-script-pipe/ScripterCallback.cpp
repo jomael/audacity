@@ -15,9 +15,7 @@
 
 #include <wx/wx.h>
 #include "ScripterCallback.h"
-//#include "../lib_widget_extra/ShuttleGuiBase.h"
 #include "../../src/Audacity.h"
-#include "../../src/ShuttleGui.h"
 
 #if defined(__WXMSW__)
 #include <wx/init.h>
@@ -79,12 +77,6 @@ and replace the main project window with our own wxFrame.
 #endif
 
 
-// HACK!
-// This must match the enum in LoadModules.h
-// We do NOT include LoadModules.h, because we want
-// this DLL to be usable with programs other than Audacity.
-// (More work required for this to be possible -
-// we need new header files that just define the interface).
 typedef enum
 {
    ModuleInitialize,
@@ -92,8 +84,7 @@ typedef enum
    AppInitialized,
    AppQuiting,
    ProjectInitialized,
-   ProjectClosing,
-   MenusRebuilt
+   ProjectClosing
 } ModuleDispatchTypes;
 
 
@@ -105,7 +96,7 @@ static tpExecScriptServerFunc pScriptServerFn=NULL;
 extern "C" {
 
 
-DLL_API wxChar * GetVersionString()
+DLL_API const wxChar * GetVersionString()
 {
    // Make sure that this version of the module requires the version 
    // of Audacity it is built with. 
@@ -116,8 +107,7 @@ DLL_API wxChar * GetVersionString()
 
 extern int DLL_API  ModuleDispatch(ModuleDispatchTypes type);
 // ModuleDispatch
-// is called by Audacity to initialize/terminmate the module,
-// and ask if it has anything for the menus.
+// is called by Audacity to initialize/terminate the module
 // We don't (yet) do anything in this, since we have a special function for the scripter
 // all we need to do is return 1.
 int ModuleDispatch(ModuleDispatchTypes type){
@@ -128,8 +118,7 @@ int ModuleDispatch(ModuleDispatchTypes type){
       case AppQuiting: {
       }
       break;
-      case ProjectInitialized:
-      case MenusRebuilt:  {
+      case ProjectInitialized: {
       }
       break;
       default:
@@ -160,7 +149,11 @@ size_t currentPosition;
 // The response lines can be retrieved by calling DoSrvMore repeatedly.
 int DoSrv(char *pIn)
 {
-   wxString Str1(pIn, wxConvISO8859_1);
+   // Interpret string as unicode.
+   // wxWidgets (now) uses unicode internally.
+   // Scripts must send unicode strings (if going beyond 7-bit ASCII).
+   // Important for filenames in commands.
+   wxString Str1(pIn, wxConvUTF8); 
    Str1.Replace( wxT("\r"), wxT(""));
    Str1.Replace( wxT("\n"), wxT(""));
    Str2 = wxEmptyString;

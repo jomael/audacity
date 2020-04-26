@@ -9,18 +9,9 @@
 #ifndef __NYQUIST_EFFECT_WORKBENCH__
 #define __NYQUIST_EFFECT_WORKBENCH__
 
-#include <wx/defs.h>
-
-#include <wx/button.h>
-#include <wx/dialog.h>
-#include <wx/filename.h>
-#include <wx/fdrepdlg.h>
-#include <wx/hashmap.h>
-#include <wx/splitter.h>
-#include <wx/statbox.h>
-#include <wx/stattext.h>
+#include <wx/fdrepdlg.h> // wxFindReplaceData member variable
+#include <wx/frame.h> // to inherit
 #include <wx/string.h>
-#include <wx/textctrl.h>
 
 #include <iostream>
 #include <ostream>
@@ -28,6 +19,8 @@
 
 #include "commands/CommandManager.h"
 #include "effects/nyquist/Nyquist.h"
+
+class wxFileName;
 
 //----------------------------------------------------------------------------
 // NyqTextCtrl
@@ -114,6 +107,7 @@ class NyqBench:public wxFrame
    void ShowNyqBench(const CommandContext&);
 
    static NyqBench *GetBench();
+   void SavePrefs();
 
  private:
    void PopulateOrExchange(ShuttleGui & S);

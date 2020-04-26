@@ -15,12 +15,21 @@
 #define __AUDACITY_MULTIDIALOG__
 
 #include <wx/defs.h>
-#include <wx/window.h>
+
+#include <wx/chartype.h> // for typedef wxChar
+#include "../Internat.h" // for TranslatableStrings
+class wxString;
+
+const TranslatableString &DefaultMultiDialogMessage();
 
 // Display a dialog with radio buttons.
 // Return the zero-based index of the chosen button.
-int ShowMultiDialog(const wxString &message,
-                    const wxString &title,
-                    const wxChar **buttons, const wxString &boxMsg = _("Please select an action"), bool log = true);
+int ShowMultiDialog(const TranslatableString &message,
+                    const TranslatableString &title,
+                    const TranslatableStrings &buttons,
+                    const wxString & helpPage,
+                    const TranslatableString &boxMsg
+                       = DefaultMultiDialogMessage(),
+                    bool log = true);
 
 #endif // __AUDACITY_MULTIDIALOG__

@@ -16,17 +16,24 @@
 
 #include "../Audacity.h"
 #include "Reverse.h"
+#include "LoadEffects.h"
 
 #include <math.h>
 
 #include <wx/intl.h>
 
 #include "../LabelTrack.h"
+#include "../WaveClip.h"
 #include "../WaveTrack.h"
 
 //
 // EffectReverse
 //
+
+const ComponentInterfaceSymbol EffectReverse::Symbol
+{ XO("Reverse") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectReverse > reg; }
 
 EffectReverse::EffectReverse()
 {
@@ -36,16 +43,16 @@ EffectReverse::~EffectReverse()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectReverse::GetSymbol()
+ComponentInterfaceSymbol EffectReverse::GetSymbol()
 {
-   return REVERSE_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectReverse::GetDescription()
+TranslatableString EffectReverse::GetDescription()
 {
-   return _("Reverses the selected audio");
+   return XO("Reverses the selected audio");
 }
 
 // EffectDefinitionInterface implementation
@@ -64,40 +71,30 @@ bool EffectReverse::IsInteractive()
 
 bool EffectReverse::Process()
 {
-   //Track::All is needed because Reverse should move the labels too
-   this->CopyInputTracks(Track::All); // Set up mOutputTracks.
+   //all needed because Reverse should move the labels too
+   this->CopyInputTracks(true); // Set up mOutputTracks.
    bool bGoodResult = true;
-
-   TrackListIterator iter(mOutputTracks.get());
-   Track *t = iter.First();
    int count = 0;
-   while (t) {
-      if (t->GetKind() == Track::Wave &&
-            (t->GetSelected() || t->IsSyncLockSelected()))
-      {
-         WaveTrack *track = (WaveTrack*)t;
 
+   auto trackRange =
+      mOutputTracks->Any() + &Track::IsSelectedOrSyncLockSelected;
+   trackRange.VisitWhile( bGoodResult,
+      [&](WaveTrack * track) {
          if (mT1 > mT0) {
             auto start = track->TimeToLongSamples(mT0);
             auto end = track->TimeToLongSamples(mT1);
             auto len = end - start;
 
             if (!ProcessOneWave(count, track, start, len))
-            {
                bGoodResult = false;
-               break;
-            }
          }
-      }
-      else if (t->GetKind() == Track::Label &&
-            (t->GetSelected() || t->IsSyncLockSelected()))
-      {
-         LabelTrack *track = (LabelTrack*)t;
+         count++;
+      },
+      [&](LabelTrack * track) {
          track->ChangeLabelsOnReverse(mT0, mT1);
+         count++;
       }
-      t = iter.Next();
-      count++;
-   }
+   );
 
    this->ReplaceProcessedTracks(bGoodResult);
    return bGoodResult;
@@ -203,8 +200,10 @@ bool EffectReverse::ProcessOneWave(int count, WaveTrack * track, sampleCount sta
    // the last clip of revClips is appended to the track first
    // PRL:  I don't think that matters, the sequence of storage of clips in the track
    // is not elsewhere assumed to be by time
-   for (auto it = revClips.rbegin(), end = revClips.rend(); it != end; ++it)
-      track->AddClip(std::move(*it));
+   {
+      for (auto it = revClips.rbegin(), revEnd = revClips.rend(); it != revEnd; ++it)
+         track->AddClip(std::move(*it));
+   }
 
    for (auto &clip : otherClips)
       track->AddClip(std::move(clip));

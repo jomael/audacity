@@ -17,11 +17,6 @@
 #ifndef __AUDACITY_EFFECT_TRUNC_SILENCE__
 #define __AUDACITY_EFFECT_TRUNC_SILENCE__
 
-#include <wx/arrstr.h>
-#include <wx/event.h>
-#include <wx/list.h>
-#include <wx/string.h>
-
 #include "Effect.h"
 
 class ShuttleGui;
@@ -29,20 +24,20 @@ class wxChoice;
 class wxTextCtrl;
 class wxCheckBox;
 
-#define TRUNCATESILENCE_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Truncate Silence") }
-
 class RegionList;
 
 class EffectTruncSilence final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectTruncSilence();
    virtual ~EffectTruncSilence();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
    wxString ManualPage() override;
 
    // EffectDefinitionInterface implementation
@@ -90,14 +85,15 @@ private:
    bool ProcessIndependently();
    bool ProcessAll();
    bool FindSilences
-      (RegionList &silences, TrackList *list, Track *firstTrack, Track *lastTrack);
+      (RegionList &silences, const TrackList *list,
+       const Track *firstTrack, const Track *lastTrack);
    bool DoRemoval
       (const RegionList &silences, unsigned iGroup, unsigned nGroups, Track *firstTrack, Track *lastTrack,
        double &totalCutLen);
 
 private:
 
-   int mTruncDbChoiceIndex;
+   double mThresholdDB {} ;
    int mActionIndex;
    double mInitialAllowedSilence;
    double mTruncLongestAllowedSilence;
@@ -106,7 +102,7 @@ private:
 
    size_t mBlendFrameCount;
 
-   wxChoice *mTruncDbChoice;
+   wxTextCtrl *mThresholdText;
    wxChoice *mActionChoice;
    wxTextCtrl *mInitialAllowedSilenceT;
    wxTextCtrl *mTruncLongestAllowedSilenceT;

@@ -14,8 +14,6 @@ Paul Licameli split from TrackPanel.cpp
 class wxMouseState;
 class NoteTrack;
 
-#include <wx/gdicmn.h>
-#include "../../../../MemoryX.h"
 #include "../../../../UIHandle.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -48,7 +46,7 @@ public:
        const NoteTrackButtonHandle &newState);
 
 protected:
-   void Enter(bool forward) override;
+   void Enter(bool forward, AudacityProject *) override;
 
    Result Click
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
@@ -57,7 +55,7 @@ protected:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release

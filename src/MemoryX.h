@@ -8,414 +8,8 @@
 #define safenew new
 #endif
 
-// Conditional compilation switch indicating whether to rely on
-// std:: containers knowing about rvalue references
-#undef __AUDACITY_OLD_STD__
 
-
-// JKC:
-// This is completely the wrong way to test for new stdlib (supporting std::hash etc)
-// We should instead use configure checks or test if __cplusplus is bigger that some value.
-//
-// On the other hand, as we are moving to wxWidgets 3.1.1, macOSX 10.7+ is required.
-// And we could just assume/require building with C++11 and remove the body of this
-// ifdef - i.e. no longer support those workarounds.
-//
-// Macports have provided some really useful information about possibilities for
-// building with newer compilers and older SDKs.  So the option of building with old
-// compilers and old SDKs may not be needed at all, making the shift to requiring
-// C++11 have little to no downside.  So as of 13th April 2018 the code in this
-// ifdef's days are numbered.
-#if defined(__MAC_OS_X_VERSION_MIN_REQUIRED) && __MAC_OS_X_VERSION_MIN_REQUIRED <= __MAC_10_6
-
-#define __AUDACITY_OLD_STD__
-
-#include <math.h>
-inline long long int llrint(float __x) { return __builtin_llrintf(__x); }
-inline long long int llrint(double __x) { return __builtin_llrintl(__x); }
-inline long long int llrint(long double __x) { return __builtin_llrintl(__x); }
-
-#include <cmath>
-using std::isnan;
-using std::isinf;
-
-// Need this to define move() and forward()
-#include <tr1/type_traits>
-
-// To define make_shared
-#include <tr1/memory>
-
-// To define function
-#include <tr1/functional>
-
-// To define unordered_set
-#include <tr1/unordered_set>
-
-// To define unordered_map and hash
-#include <tr1/unordered_map>
-
-#include <tr1/tuple>
-
-namespace std {
-   using std::tr1::unordered_set;
-   using std::tr1::hash;
-   using std::tr1::unordered_map;
-   using std::tr1::function;
-   using std::tr1::shared_ptr;
-   using std::tr1::weak_ptr;
-   using std::tr1::static_pointer_cast;
-   using std::tr1::remove_reference;
-   using std::tr1::is_unsigned;
-   using std::tr1::is_const;
-   using std::tr1::add_const;
-   using std::tr1::add_pointer;
-   using std::tr1::remove_pointer;
-   using std::tr1::tuple;
-   using std::tr1::get;
-
-   template<typename T> struct add_rvalue_reference {
-      using type = T&&;
-   };
-
-   template<typename X> struct default_delete
-   {
-      default_delete() {}
-      
-      // Allow copy from other deleter classes
-      template<typename Y>
-      default_delete(const default_delete<Y>& that)
-      {
-         // Break compilation if Y* does not convert to X*
-         // I should figure out the right use of enable_if instead
-         // Note: YPtr avoids bogus compiler warning for C99 compound literals
-         using YPtr = Y*;
-         static_assert((static_cast<X*>(YPtr{}), true),
-                       "Pointer types not convertible");
-      }
-      
-      inline void operator() (void *p) const
-      {
-         delete static_cast<X*>(p);
-      }
-   };
-   
-   // Specialization for arrays
-   template<typename X> struct default_delete<X[]>
-   {
-      // Do not allow copy from other deleter classes
-      inline void operator() (void *p) const
-      {
-         delete[] static_cast<X*>(p);
-      }
-   };
-
-   struct nullptr_t
-   {
-      void* __lx;
-
-      struct __nat {int __for_bool_;};
-
-      nullptr_t() : __lx(0) {}
-      nullptr_t(int __nat::*) : __lx(0) {}
-
-      operator int __nat::*() const {return 0;}
-
-      template <class _Tp>
-         operator _Tp* () const {return 0;}
-
-      template <class _Tp, class _Up>
-         operator _Tp _Up::* () const {return 0;}
-
-      friend bool operator==(nullptr_t, nullptr_t) {return true;}
-      friend bool operator!=(nullptr_t, nullptr_t) {return false;}
-      friend bool operator<(nullptr_t, nullptr_t) {return false;}
-      friend bool operator<=(nullptr_t, nullptr_t) {return true;}
-      friend bool operator>(nullptr_t, nullptr_t) {return false;}
-      friend bool operator>=(nullptr_t, nullptr_t) {return true;}
-   };
-
-   inline nullptr_t __get_nullptr_t() {return nullptr_t(0);}
-
-   #define nullptr std::__get_nullptr_t()
-
-   // "Cast" anything as an rvalue reference.
-   template<typename T> inline typename remove_reference<T>::type&& move(T&& t)
-   { return static_cast<typename std::remove_reference<T>::type&&>(t); }
-
-   template<typename T, typename D = default_delete<T>> class unique_ptr
-      : private D // use empty base optimization
-   {
-   public:
-      // Default constructor
-      unique_ptr() {}
-      
-      // Implicit constrution from nullptr
-      unique_ptr(nullptr_t) {}
-
-      // Explicit constructor from pointer and optional deleter
-      explicit unique_ptr(T *p_)
-         : p{ p_ } {}
-      explicit unique_ptr(T *p_, const D &d)
-         : D(d), p{ p_ } {}
-      // Template constructors for upcasting
-      template<typename U>
-      explicit unique_ptr(U* p_)
-         : p{ p_ } {}
-      template<typename U>
-      explicit unique_ptr(U* p_, const D& d)
-         : D(d), p{ p_ } {}
-
-      // Copy is disallowed
-      unique_ptr(const unique_ptr &) PROHIBITED;
-      unique_ptr& operator= (const unique_ptr &) PROHIBITED;
-
-      // But move is allowed!
-      unique_ptr(unique_ptr &&that)
-         : D(move(that.get_deleter())), p{ that.release() } { }
-      unique_ptr& operator= (unique_ptr &&that)
-      {
-         if (this != &that) {
-            get_deleter()(p);
-            ((D&)*this) = move(that.get_deleter());
-            p = that.release();
-         }
-         return *this;
-      }
-
-      // Assign null
-      unique_ptr& operator= (nullptr_t)
-      {
-         get_deleter()(p);
-         p = nullptr;
-         return *this;
-      }
-
-      // Template versions of move for upcasting
-      template<typename U, typename E>
-      unique_ptr(unique_ptr<U, E> &&that)
-         : D(move(that.get_deleter())), p{ that.release() } { }
-      template<typename U, typename E>
-      unique_ptr& operator= (unique_ptr<U, E> &&that)
-      {
-         // Skip the self-assignment test -- self-assignment should go to the non-template overload
-         get_deleter()(p);
-         p = that.release();
-         get_deleter() = move(that.get_deleter());
-         return *this;
-      }
-      
-      D& get_deleter() { return *this; }
-      const D& get_deleter() const { return *this; }
-
-      ~unique_ptr() { get_deleter()(p); }
-
-      T* operator -> () const { return p; }
-      T& operator * () const { return *p; }
-      T* get() const { return p; }
-
-      // So you can say if(p)
-      explicit operator bool() const { return p != nullptr; }
-
-      // Give up ownership, don't destroy
-      T* release() { T* result = p; p = nullptr; return result; }
-
-      void reset(T* __p = nullptr)
-      {
-         T* old__p = p;
-         p = __p;
-         if (old__p != nullptr)
-         {
-            get_deleter()(old__p);
-         }
-      }
-
-      void swap(unique_ptr& that)
-      {
-         std::swap(p, that.p);
-         std::swap(get_deleter(), that.get_deleter());
-      }
-
-   private:
-      T *p{};
-   };
-
-   // Now specialize the class for array types
-   template<typename T, typename D> class unique_ptr<T[], D>
-      : private D // use empty base optimization
-   {
-   public:
-      // Default constructor
-      unique_ptr() {}
-
-      // Implicit constrution from nullptr
-      unique_ptr(nullptr_t) {}
-      
-      // Explicit constructor from pointer
-      explicit unique_ptr(T *p_)
-         : p{ p_ } {}
-      explicit unique_ptr(T *p_, const D &d)
-         : D( d ), p{ p_ } {}
-      // NO template constructor for upcasting!
-
-      // Copy is disallowed
-      unique_ptr(const unique_ptr &) PROHIBITED;
-      unique_ptr& operator= (const unique_ptr &)PROHIBITED;
-
-      // But move is allowed!
-      unique_ptr(unique_ptr &&that)
-         : D( move(that.get_deleter()) ), p{ that.release() } { }
-      unique_ptr& operator= (unique_ptr &&that)
-      {
-         if (this != &that) {
-            get_deleter()(p);
-            p = that.release();
-            ((D&)*this) = move(that.get_deleter());
-         }
-         return *this;
-      }
-
-      // Assign null
-      unique_ptr& operator= (nullptr_t)
-      {
-         get_deleter()(p);
-         p = nullptr;
-         return *this;
-      }
-      
-      D& get_deleter() { return *this; }
-      const D& get_deleter() const { return *this; }
-
-      // NO template versions of move for upcasting!
-
-      ~unique_ptr() { get_deleter()(p); }
-
-      // No operator ->, but [] instead
-      T& operator [] (size_t n) const { return p[n]; }
-
-      T& operator * () const { return *p; }
-      T* get() const { return p; }
-
-      // So you can say if(p)
-      explicit operator bool() const { return p != nullptr; }
-
-      // Give up ownership, don't destroy
-      T* release() { T* result = p; p = nullptr; return result; }
-
-      void reset(T* __p = nullptr)
-      {
-         T* old__p = p;
-         p = __p;
-         if (old__p != nullptr)
-         {
-            get_deleter()(old__p);
-         }
-      }
-
-      void swap(unique_ptr& that)
-      {
-         std::swap(p, that.p);
-         std::swap(get_deleter(), that.get_deleter());
-      }
-
-   private:
-      T *p{};
-   };
-
-   // Equality operators for unique_ptr, don't need the specializations for array case
-   template<typename U, typename E>
-   inline bool operator== (nullptr_t, const unique_ptr<U, E>& ptr)
-   {
-      return ptr.get() == nullptr;
-   }
-   template<typename U, typename E>
-   inline bool operator== (const unique_ptr<U, E>& ptr, nullptr_t)
-   {
-      return ptr.get() == nullptr;
-   }
-   template<typename U, typename E, typename V, typename F>
-   inline bool operator == (const unique_ptr<U, E> &ptr1,
-                            const unique_ptr<V, F> &ptr2)
-   {
-      return ptr1.get() == ptr2.get();
-   }
-
-   template<typename U, typename E> inline bool operator != (nullptr_t, const unique_ptr<U, E> &ptr) { return !(ptr == nullptr); }
-   template<typename U, typename E> inline bool operator != (const unique_ptr<U, E> &ptr, nullptr_t) { return !(ptr == nullptr); }
-   template<typename U, typename E, typename V, typename F> inline bool operator != (const unique_ptr<U, E>& ptr1, const unique_ptr<V, F> &ptr2)
-   { return !(ptr1 == ptr2); }
-
-   // Forward -- pass along rvalue references as rvalue references, anything else as it is
-   // (Because the appropriate overload is taken, and "reference collapse" applies to the return type)
-   template<typename T> inline T&& forward(typename remove_reference<T>::type& t)
-   { return static_cast<T&&>(t); }
-   template<typename T> inline T&& forward(typename remove_reference<T>::type&& t)
-   { return static_cast<T&&>(t); }
-
-   // Declared but never defined, and typically used in decltype constructs
-   template<typename T>
-   typename std::add_rvalue_reference<T>::type declval() //noexcept
-   ;
-
-   // We need make_shared for ourselves, because the library doesn't use variadics
-   template<typename X, typename... Args> inline shared_ptr<X> make_shared(Args&&... args)
-   {
-      return shared_ptr<X>{ safenew X(forward<Args>(args)...) };
-   }
-   // From LLVM c++11 and modified
-
-   #include <cstddef>
-
-   template<class _Ep>
-   class initializer_list
-   {
-       const _Ep* __begin_;
-       size_t    __size_;
-
-       initializer_list(const _Ep* __b, size_t __s)
-           : __begin_(__b),
-             __size_(__s)
-           {}
-   public:
-       typedef _Ep        value_type;
-       typedef const _Ep& reference;
-       typedef const _Ep& const_reference;
-       typedef size_t    size_type;
-
-       typedef const _Ep* iterator;
-       typedef const _Ep* const_iterator;
-
-       initializer_list() : __begin_(nullptr), __size_(0) {}
-
-       size_t    size()  const {return __size_;}
-
-       const _Ep* begin() const {return __begin_;}
-
-       const _Ep* end()   const {return __begin_ + __size_;}
-   };
-
-   template<class _Ep>
-   inline
-   const _Ep*
-   begin(initializer_list<_Ep> __il)
-   {
-       return __il.begin();
-   }
-
-   template<class _Ep>
-   inline
-   const _Ep*
-   end(initializer_list<_Ep> __il)
-   {
-       return __il.end();
-   }
-}
-
-#else
-
-// To define function
 #include <functional>
-
-#endif
 
 #if !(_MSC_VER >= 1800 || __cplusplus >= 201402L)
 /* replicate the very useful C++14 make_unique for those build environments
@@ -529,11 +123,14 @@ public:
    }
 };
 
-/*
- * ArraysOf<X>
- * This simplifies arrays of arrays, each array separately allocated with NEW[]
- * But it might be better to use std::Array<ArrayOf<X>, N> for some small constant N
- * Or use just one array when sub-arrays have a common size and are not large.
+/**
+  \class ArrayOf
+
+  ArraysOf<X>
+
+  \brief This simplifies arrays of arrays, each array separately allocated with NEW[]
+  But it might be better to use std::Array<ArrayOf<X>, N> for some small constant N
+  Or use just one array when sub-arrays have a common size and are not large.
  */
 template<typename X>
 class ArraysOf : public ArrayOf<ArrayOf<X>>
@@ -587,12 +184,16 @@ public:
    }
 };
 
-/*
- * template class Maybe<X>
- * Can be used for monomorphic objects that are stack-allocable, but only conditionally constructed.
- * You might also use it as a member.
- * Initialize with create(), then use like a smart pointer,
- * with *, ->, get(), reset(), or in if()
+/**
+  \class Optional
+  \brief Like a smart pointer, allows for object to not exist (nullptr)
+  \brief emulating some of std::optional of C++17
+
+  template class Optional<X>
+  Can be used for monomorphic objects that are stack-allocable, but only conditionally constructed.
+  You might also use it as a member.
+  Initialize with emplace(), then use like a smart pointer,
+  with *, ->, reset(), or in if()
  */
 
 // Placement-NEW is used below, and that does not cooperate with the DEBUG_NEW for Visual Studio
@@ -602,82 +203,81 @@ public:
 #endif
 #endif
 
+
 template<typename X>
-class Maybe {
+class Optional {
 public:
 
+   using value_type = X;
+
    // Construct as NULL
-   Maybe() {}
+   Optional() {}
 
    // Supply the copy and move, so you might use this as a class member too
-   Maybe(const Maybe &that)
+   Optional(const Optional &that)
    {
-      if (that.get())
-         create(*that);
+      if (that)
+         emplace(*that);
    }
 
-   Maybe& operator= (const Maybe &that)
+   Optional& operator= (const Optional &that)
    {
       if (this != &that) {
-         if (that.get())
-            create(*that);
+         if (that)
+            emplace(*that);
          else
             reset();
       }
       return *this;
    }
 
-   Maybe(Maybe &&that)
+   Optional(Optional &&that)
    {
-      if (that.get())
-         create(::std::move(*that));
+      if (that)
+         emplace(::std::move(*that));
    }
 
-   Maybe& operator= (Maybe &&that)
+   Optional& operator= (Optional &&that)
    {
       if (this != &that) {
-         if (that.get())
-            create(::std::move(*that));
+         if (that)
+            emplace(::std::move(*that));
          else
             reset();
       }
       return *this;
    }
 
-   // Make an object in the buffer, passing constructor arguments,
-   // but destroying any previous object first
-   // Note that if constructor throws, we remain in a consistent
-   // NULL state -- giving exception safety but only weakly
-   // (previous value was lost if present)
+   /// Make an object in the buffer, passing constructor arguments,
+   /// but destroying any previous object first
+   /// Note that if constructor throws, we remain in a consistent
+   /// NULL state -- giving exception safety but only weakly
+   /// (previous value was lost if present)
    template<typename... Args>
-   void create(Args&&... args)
+   X& emplace(Args&&... args)
    {
       // Lose any old value
       reset();
-      // Create NEW value
+      // emplace NEW value
       pp = safenew(address()) X(std::forward<Args>(args)...);
+      return **this;
    }
 
    // Destroy any object that was built in it
-   ~Maybe()
+   ~Optional()
    {
       reset();
    }
 
    // Pointer-like operators
 
-   // Dereference, with the usual bad consequences if NULL
+   /// Dereference, with the usual bad consequences if NULL
    X &operator* () const
    {
       return *pp;
    }
 
    X *operator-> () const
-   {
-      return pp;
-   }
-
-   X* get() const
    {
       return pp;
    }
@@ -690,6 +290,11 @@ public:
 
    // So you can say if(ptr)
    explicit operator bool() const
+   {
+      return pp != nullptr;
+   }
+
+   bool has_value() const
    {
       return pp != nullptr;
    }
@@ -719,126 +324,49 @@ private:
 #ifdef _DEBUG
 #ifdef _MSC_VER
 #undef THIS_FILE
-static char*THIS_FILE = __FILE__;
+static const char THIS_FILE[] = __FILE__;
 #define new new(_NORMAL_BLOCK, THIS_FILE, __LINE__)
 #endif
 #endif
 
-// Frequently, we need to use a vector or list of unique_ptr if we can, but default
-// to shared_ptr if we can't (because containers know how to copy elements only,
-// not move them).
-#ifdef __AUDACITY_OLD_STD__
-template<typename T> using movable_ptr = std::shared_ptr<T>;
-template<typename T, typename Deleter> using movable_ptr_with_deleter_base = std::shared_ptr<T>;
-#else
-template<typename T> using movable_ptr = std::unique_ptr<T>;
-template<typename T, typename Deleter> using movable_ptr_with_deleter_base = std::unique_ptr<T, Deleter>;
-#endif
-
-template<typename T, typename... Args>
-inline movable_ptr<T> make_movable(Args&&... args)
-{
-   return std::
-#ifdef __AUDACITY_OLD_STD__
-      make_shared
-#else
-      make_unique
-#endif
-      <T>(std::forward<Args>(args)...);
-}
-
-template<typename T, typename Deleter> class movable_ptr_with_deleter
-   : public movable_ptr_with_deleter_base < T, Deleter >
-{
-public:
-   // Do not expose a constructor that takes only a pointer without deleter
-   // That is important when implemented with shared_ptr
-   movable_ptr_with_deleter() {};
-   movable_ptr_with_deleter(T* p, const Deleter &d)
-      : movable_ptr_with_deleter_base<T, Deleter>( p, d ) {}
-
-#ifdef __AUDACITY_OLD_STD__
-
-   // copy
-   movable_ptr_with_deleter(const movable_ptr_with_deleter &that)
-      : movable_ptr_with_deleter_base < T, Deleter > ( that )
-   {
-   }
-
-   movable_ptr_with_deleter &operator= (const movable_ptr_with_deleter& that)
-   {
-      if (this != &that) {
-         ((movable_ptr_with_deleter_base<T, Deleter>&)(*this)) =
-            that;
-      }
-      return *this;
-   }
-
-#else
-
-   // move
-   movable_ptr_with_deleter(movable_ptr_with_deleter &&that)
-      : movable_ptr_with_deleter_base < T, Deleter > ( std::move(that) )
-   {
-   }
-
-   movable_ptr_with_deleter &operator= (movable_ptr_with_deleter&& that)
-   {
-      if (this != &that) {
-         ((movable_ptr_with_deleter_base<T, Deleter>&)(*this)) =
-         std::move(that);
-      }
-      return *this;
-   }
-
-#endif
-};
-
-template<typename T, typename Deleter, typename... Args>
-inline movable_ptr_with_deleter<T, Deleter>
-make_movable_with_deleter(const Deleter &d, Args&&... args)
-{
-   return movable_ptr_with_deleter<T, Deleter>(safenew T(std::forward<Args>(args)...), d);
-}
-
-/*
- * A deleter for pointers obtained with malloc
+/**
+  A deleter for pointers obtained with malloc
  */
 struct freer { void operator() (void *p) const { free(p); } };
 
-/*
- * A useful alias for holding the result of malloc
+/**
+  A useful alias for holding the result of malloc
  */
 template< typename T >
 using MallocPtr = std::unique_ptr< T, freer >;
 
-/*
- * A useful alias for holding the result of strup and similar
+/**
+  A useful alias for holding the result of strup and similar
  */
 template <typename Character = char>
 using MallocString = std::unique_ptr< Character[], freer >;
 
-/*
- * A deleter class to supply the second template parameter of unique_ptr for
- * classes like wxWindow that should be sent a message called Destroy rather
- * than be deleted directly
+/**
+  \brief A deleter class to supply the second template parameter of unique_ptr for
+  classes like wxWindow that should be sent a message called Destroy rather
+  than be deleted directly
  */
 template <typename T>
 struct Destroyer {
    void operator () (T *p) const { if (p) p->Destroy(); }
 };
 
-/*
- * a convenience for using Destroyer
+/**
+  \brief a convenience for using Destroyer
  */
 template <typename T>
 using Destroy_ptr = std::unique_ptr<T, Destroyer<T>>;
 
-/*
- * "finally" as in The C++ Programming Language, 4th ed., p. 358
- * Useful for defining ad-hoc RAII actions.
- * typical usage:
- * auto cleanup = finally([&]{ ... code; ... });
+/**
+  \brief "finally" as in The C++ Programming Language, 4th ed., p. 358
+  Useful for defining ad-hoc RAII actions.
+  typical usage:
+  auto cleanup = finally([&]{ ... code; ... });
  */
 
 // Construct this from any copyable function object, such as a lambda
@@ -849,8 +377,8 @@ struct Final_action {
    F clean;
 };
 
-// Function template with type deduction lets you construct Final_action
-// without typing any angle brackets
+/// \brief Function template with type deduction lets you construct Final_action
+/// without typing any angle brackets
 template <typename F>
 Final_action<F> finally (F f)
 {
@@ -860,8 +388,8 @@ Final_action<F> finally (F f)
 #include <wx/utils.h> // for wxMin, wxMax
 #include <algorithm>
 
-/*
- * Set a variable temporarily in a scope
+/**
+  \brief Structure used by ValueRestorer 
  */
 template< typename T >
 struct RestoreValue {
@@ -869,6 +397,10 @@ struct RestoreValue {
    void operator () ( T *p ) const { if (p) *p = oldValue; }
 };
 
+
+/**
+  \brief Set a variable temporarily in a scope
+  */
 template< typename T >
 class ValueRestorer : public std::unique_ptr< T, RestoreValue<T> >
 {
@@ -891,7 +423,7 @@ public:
    }
 };
 
-// inline functions provide convenient parameter type deduction
+/// inline functions provide convenient parameter type deduction
 template< typename T >
 ValueRestorer< T > valueRestorer( T& var )
 { return ValueRestorer< T >{ var }; }
@@ -900,8 +432,21 @@ template< typename T >
 ValueRestorer< T > valueRestorer( T& var, const T& newValue )
 { return ValueRestorer< T >{ var, newValue }; }
 
-/*
- * A convenience for use with range-for
+/**
+  \brief A convenience for defining iterators that return rvalue types, so that
+  they cooperate correctly with stl algorithms and std::reverse_iterator
+ */
+template< typename Value, typename Category = std::forward_iterator_tag >
+using ValueIterator = std::iterator<
+   Category, const Value, ptrdiff_t,
+   // void pointer type so that operator -> is disabled
+   void,
+   // make "reference type" really the same as the value type
+   const Value
+>;
+
+/**
+  \brief A convenience for use with range-for
  */
 template <typename Iterator>
 struct IteratorRange : public std::pair<Iterator, Iterator> {
@@ -1002,7 +547,7 @@ struct IteratorRange : public std::pair<Iterator, Iterator> {
       R2 (C :: * pmf) () const
    ) const
    {
-      return this->accumulate( init, binary_op, std::mem_fun( pmf ) );
+      return this->accumulate( init, binary_op, std::mem_fn( pmf ) );
    }
 
    // Some accumulations frequent enough to be worth abbreviation:
@@ -1025,7 +570,7 @@ struct IteratorRange : public std::pair<Iterator, Iterator> {
    >
    R min( R2 (C :: * pmf) () const ) const
    {
-      return this->min( std::mem_fun( pmf ) );
+      return this->min( std::mem_fn( pmf ) );
    }
 
    template<
@@ -1035,8 +580,7 @@ struct IteratorRange : public std::pair<Iterator, Iterator> {
    R max( Unary unary_op = {} ) const
    {
       return this->accumulate(
-         -std::numeric_limits< R >::max(),
-         // std::numeric_limits< R >::lowest(), // TODO C++11
+         std::numeric_limits< R >::lowest(),
          (const R&(*)(const R&, const R&)) std::max,
          unary_op
       );
@@ -1048,7 +592,7 @@ struct IteratorRange : public std::pair<Iterator, Iterator> {
    >
    R max( R2 (C :: * pmf) () const ) const
    {
-      return this->max( std::mem_fun( pmf ) );
+      return this->max( std::mem_fn( pmf ) );
    }
 
    template<
@@ -1070,7 +614,7 @@ struct IteratorRange : public std::pair<Iterator, Iterator> {
    >
    R sum( R2 (C :: * pmf) () const ) const
    {
-      return this->sum( std::mem_fun( pmf ) );
+      return this->sum( std::mem_fn( pmf ) );
    }
 };
 
@@ -1095,117 +639,77 @@ make_iterator_range( const Container &container )
    return { container.begin(), container.end() };
 }
 
-/*
- * Transform an iterator sequence, as another iterator sequence
- */
-template <
-   typename Result,
-   typename Iterator
->
-class transform_iterator
-   : public std::iterator<
-      typename std::iterator_traits<Iterator>::iterator_category,
-      const Result
-   >
+// A utility function building a container of results
+template< typename Container, typename Iterator, typename Function >
+Container transform_range( Iterator first, Iterator last, Function &&fn )
 {
-   // This takes a function on iterators themselves, not on the
-   // dereference of those iterators, in case you ever need the generality.
-   using Function = std::function< Result( const Iterator& ) >;
+   Container result;
+   std::transform( first, last, std::back_inserter( result ), fn );
+   return result;
+}
+// A utility function, often constructing a vector from another vector
+template< typename OutContainer, typename InContainer, typename Function >
+OutContainer transform_container( InContainer &inContainer, Function &&fn )
+{
+   return transform_range<OutContainer>(
+      inContainer.begin(), inContainer.end(), fn );
+}
 
-private:
-   Iterator mIterator;
-   Function mFunction;
-
+// Extend wxArrayString with move operations and construction and insertion from
+// std::initializer_list
+class wxArrayStringEx : public wxArrayString
+{
 public:
-   transform_iterator(const Iterator &iterator, const Function &function)
-      : mIterator( iterator )
-      , mFunction( function )
-   {}
+   using wxArrayString::wxArrayString;
+   wxArrayStringEx() = default;
 
-   transform_iterator &operator ++ ()
-      { ++this->mIterator; return *this; }
-   transform_iterator operator ++ (int)
-      { auto copy{*this}; ++this->mIterator; return copy; }
-   transform_iterator &operator -- ()
-      { --this->mIterator; return *this; }
-   transform_iterator operator -- (int)
-      { auto copy{*this}; --this->mIterator; return copy; }
-
-   typename transform_iterator::reference operator * ()
-      { return this->mFunction(this->mIterator); }
-
-   friend inline bool operator == (
-      const transform_iterator &a, const transform_iterator &b)
-      { return a.mIterator == b.mIterator; }
-   friend inline bool operator != (
-      const transform_iterator &a, const transform_iterator &b)
-      { return !(a == b); }
-};
-
-template <
-   typename Iterator,
-   typename Function
->
-transform_iterator<
-   decltype( std::declval<Function>() ( std::declval<Iterator>() ) ),
-   Iterator
->
-make_transform_iterator(const Iterator &iterator, Function function)
-{
-   return { iterator, function };
-}
-
-template < typename Function, typename Iterator > struct value_transformer
-{
-   // Adapts a function on values to a function on iterators.
-   Function function;
-
-   auto operator () (const Iterator &iterator)
-      -> decltype( function( *iterator ) ) const
-   { return this->function( *iterator ); }
-};
-
-template <
-   typename Function,
-   typename Iterator
->
-using value_transform_iterator = transform_iterator<
-   decltype( std::declval<Function>()( *std::declval<Iterator>() ) ),
-   Iterator
->;
-
-template <
-   typename Function,
-   typename Iterator
->
-value_transform_iterator< Function, Iterator >
-make_value_transform_iterator(const Iterator &iterator, Function function)
-{
-   using NewFunction = value_transformer<Function, Iterator>;
-   return { iterator, NewFunction{ function } };
-}
-
-// For using std::unordered_map on wxString
-namespace std
-{
-#ifdef __AUDACITY_OLD_STD__
-   namespace tr1
+   template< typename Iterator >
+   wxArrayStringEx( Iterator start, Iterator finish )
    {
-#endif
-#if !wxCHECK_VERSION(3, 1, 0)
-      template<typename T> struct hash;
-      template<> struct hash< wxString > {
-         size_t operator () (const wxString &str) const // noexcept
-         {
-            auto stdstr = str.ToStdWstring(); // no allocations, a cheap fetch
-            using Hasher = hash< decltype(stdstr) >;
-            return Hasher{}( stdstr );
-         }
-      };
-#endif
-#ifdef __AUDACITY_OLD_STD__
+      this->reserve( std::distance( start, finish ) );
+      while( start != finish )
+         this->push_back( *start++ );
    }
-#endif
-}
+
+   template< typename T >
+   wxArrayStringEx( std::initializer_list< T > items )
+   {
+      this->reserve( this->size() + items.size() );
+      for ( const auto &item : items )
+         this->push_back( item );
+   }
+
+   // The move operations can take arguments of the base class wxArrayString
+   wxArrayStringEx( wxArrayString &&other )
+   {
+      swap( other );
+   }
+
+   wxArrayStringEx &operator= ( wxArrayString &&other )
+   {
+      if ( this != &other ) {
+         clear();
+         swap( other );
+      }
+      return *this;
+   }
+
+   using wxArrayString::insert;
+
+   template< typename T >
+   iterator insert( const_iterator pos, std::initializer_list< T > items )
+   {
+      const auto index = pos - ((const wxArrayString*)this)->begin();
+      this->wxArrayString::Insert( {}, index, items.size() );
+      auto result = this->begin() + index, iter = result;
+      for ( auto pItem = items.begin(), pEnd = items.end();
+         pItem != pEnd;
+         ++pItem, ++iter
+      ) {
+         *iter = *pItem;
+      }
+      return result;
+   }
+};
 
 #endif // __AUDACITY_MEMORY_X_H__

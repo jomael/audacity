@@ -35,6 +35,11 @@ and get deterministic behaviour.
 *//*******************************************************************/
 
 
+#include "Dither.h"
+
+#include "Internat.h"
+#include "Prefs.h"
+
 // Erik de Castro Lopo's header file that
 // makes sure that we have lrint and lrintf
 // (Note: this file should be included first)
@@ -48,8 +53,6 @@ and get deterministic behaviour.
 //#include <assert.h>
 
 #include <wx/defs.h>
-
-#include "Dither.h"
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -174,11 +177,11 @@ const float Dither::SHAPED_BS[] = { 2.033f, -2.165f, 1.959f, -1.590f, 0.6149f };
 #define DITHER_LOOP(dither, store, load, dst, dstFormat, dstStride, src, srcFormat, srcStride, len) \
     do { \
        char *d, *s; \
-       unsigned int i; \
+       unsigned int ii; \
        int x; \
-       for (d = (char*)dst, s = (char*)src, i = 0; \
-            i < len; \
-            i++, d += SAMPLE_SIZE(dstFormat) * dstStride, \
+       for (d = (char*)dst, s = (char*)src, ii = 0; \
+            ii < len; \
+            ii++, d += SAMPLE_SIZE(dstFormat) * dstStride, \
                  s += SAMPLE_SIZE(srcFormat) * srcStride) \
           DITHER_STEP(dither, store, load, d, s); \
    } while (0)
@@ -392,4 +395,47 @@ inline float Dither::ShapedDither(float sample)
     mBuffer[mPhase] = xe - lrintf(result);
 
     return result;
+}
+
+static const std::initializer_list<EnumValueSymbol> choicesDither{
+   { XO("None") },
+   { XO("Rectangle") },
+   { XO("Triangle") },
+   { XO("Shaped") },
+};
+static auto intChoicesDither = {
+   DitherType::none,
+   DitherType::rectangle,
+   DitherType::triangle,
+   DitherType::shaped,
+};
+
+EnumSetting< DitherType > Dither::FastSetting{
+   wxT("Quality/DitherAlgorithmChoice"),
+   choicesDither,
+   0, // none
+
+   // for migrating old preferences:
+   intChoicesDither,
+   wxT("Quality/DitherAlgorithm")
+};
+
+EnumSetting< DitherType > Dither::BestSetting{
+   wxT("Quality/HQDitherAlgorithmChoice"),
+   choicesDither,
+   3, // shaped
+
+   // for migrating old preferences:
+   intChoicesDither,
+   wxT("Quality/HQDitherAlgorithm")
+};
+
+DitherType Dither::FastDitherChoice()
+{
+   return (DitherType) FastSetting.ReadEnum();
+}
+
+DitherType Dither::BestDitherChoice()
+{
+   return (DitherType) BestSetting.ReadEnum();
 }

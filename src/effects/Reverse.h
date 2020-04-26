@@ -13,22 +13,20 @@
 #ifndef __AUDACITY_EFFECT_REVERSE__
 #define __AUDACITY_EFFECT_REVERSE__
 
-#include <wx/string.h>
-
 #include "Effect.h"
-
-#define REVERSE_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Reverse") }
 
 class EffectReverse final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectReverse();
    virtual ~EffectReverse();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 

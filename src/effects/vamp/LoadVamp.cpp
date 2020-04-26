@@ -8,15 +8,14 @@
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+#include "../../Audacity.h" // for USE_* macros
 
 #if defined(USE_VAMP)
+#include "LoadVamp.h"
 
 #include <wx/filename.h>
 
-#include "../EffectManager.h"
 #include "VampEffect.h"
-#include "LoadVamp.h"
 
 #include <iostream>
 #include <map>
@@ -67,20 +66,20 @@ VampEffectsModule::~VampEffectsModule()
 }
 
 // ============================================================================
-// IdentInterface implementation
+// ComponentInterface implementation
 // ============================================================================
 
-wxString VampEffectsModule::GetPath()
+PluginPath VampEffectsModule::GetPath()
 {
    return mPath;
 }
 
-IdentInterfaceSymbol VampEffectsModule::GetSymbol()
+ComponentInterfaceSymbol VampEffectsModule::GetSymbol()
 {
    return XO("Vamp Effects");
 }
 
-IdentInterfaceSymbol VampEffectsModule::GetVendor()
+VendorSymbol VampEffectsModule::GetVendor()
 {
    return XO("The Audacity Team");
 }
@@ -91,9 +90,9 @@ wxString VampEffectsModule::GetVersion()
    return VAMPEFFECTS_VERSION;
 }
 
-wxString VampEffectsModule::GetDescription()
+TranslatableString VampEffectsModule::GetDescription()
 {
-   return _("Provides Vamp Effects support to Audacity");
+   return XO("Provides Vamp Effects support to Audacity");
 }
 
 // ============================================================================
@@ -112,14 +111,29 @@ void VampEffectsModule::Terminate()
    return;
 }
 
+EffectFamilySymbol VampEffectsModule::GetOptionalFamilySymbol()
+{
+#if USE_VAMP
+   return VAMPEFFECTS_FAMILY;
+#else
+   return {};
+#endif
+}
+
+const FileExtensions &VampEffectsModule::GetFileExtensions()
+{
+   static FileExtensions empty;
+   return empty;
+}
+
 bool VampEffectsModule::AutoRegisterPlugins(PluginManagerInterface & WXUNUSED(pm))
 {
    return false;
 }
 
-wxArrayString VampEffectsModule::FindPluginPaths(PluginManagerInterface & WXUNUSED(pm))
+PluginPaths VampEffectsModule::FindPluginPaths(PluginManagerInterface & WXUNUSED(pm))
 {
-   wxArrayString names;
+   PluginPaths names;
 
    PluginLoader *loader = PluginLoader::getInstance();
 
@@ -185,7 +199,7 @@ wxArrayString VampEffectsModule::FindPluginPaths(PluginManagerInterface & WXUNUS
          }
 
          wxString path = wxString::FromUTF8(i->c_str()) + wxT("/") + name;
-         names.Add(path);
+         names.push_back(path);
 
          ++output;
       }
@@ -195,10 +209,10 @@ wxArrayString VampEffectsModule::FindPluginPaths(PluginManagerInterface & WXUNUS
 }
 
 unsigned VampEffectsModule::DiscoverPluginsAtPath(
-   const wxString & path, wxString &errMsg,
+   const PluginPath & path, TranslatableString &errMsg,
    const RegistrationCallback &callback)
 {
-   errMsg.clear();
+   errMsg = {};
    int output;
    bool hasParameters;
 
@@ -212,11 +226,11 @@ unsigned VampEffectsModule::DiscoverPluginsAtPath(
       return 1;
    }
 
-   errMsg = _("Could not load the library");
+   errMsg = XO("Could not load the library");
    return 0;
 }
 
-bool VampEffectsModule::IsPluginValid(const wxString & path, bool bFast)
+bool VampEffectsModule::IsPluginValid(const PluginPath & path, bool bFast)
 {
    int output;
    bool hasParameters;
@@ -227,7 +241,7 @@ bool VampEffectsModule::IsPluginValid(const wxString & path, bool bFast)
    return bool(vp);
 }
 
-IdentInterface *VampEffectsModule::CreateInstance(const wxString & path)
+ComponentInterface *VampEffectsModule::CreateInstance(const PluginPath & path)
 {
    // Acquires a resource for the application.
    int output;
@@ -243,7 +257,7 @@ IdentInterface *VampEffectsModule::CreateInstance(const wxString & path)
    return NULL;
 }
 
-void VampEffectsModule::DeleteInstance(IdentInterface *instance)
+void VampEffectsModule::DeleteInstance(ComponentInterface *instance)
 {
    std::unique_ptr < VampEffect > {
       dynamic_cast<VampEffect *>(instance)
@@ -252,7 +266,7 @@ void VampEffectsModule::DeleteInstance(IdentInterface *instance)
 
 // VampEffectsModule implementation
 
-std::unique_ptr<Vamp::Plugin> VampEffectsModule::FindPlugin(const wxString & path,
+std::unique_ptr<Vamp::Plugin> VampEffectsModule::FindPlugin(const PluginPath & path,
                                       int & output,
                                       bool & hasParameters)
 {

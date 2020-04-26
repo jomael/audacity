@@ -12,15 +12,17 @@ Paul Licameli
 #define __AUDACITY_SPECTROGRAM_SETTINGS__
 
 #include "../Experimental.h"
+
 #include "../SampleFormat.h"
 #include "../RealFFTf.h"
 
 #undef SPECTRAL_SELECTION_GLOBAL_SWITCH
 
+class EnumValueSymbols;
 struct FFTParam;
 class NumberScale;
 class SpectrumPrefs;
-class wxArrayString;
+class wxArrayStringEx;
 
 class SpectrogramSettings
 {
@@ -65,8 +67,8 @@ public:
       stNumScaleTypes,
    };
 
-   static const wxArrayString &GetScaleNames();
-   static const wxArrayString &GetAlgorithmNames();
+   static const EnumValueSymbols &GetScaleNames();
+   static const TranslatableStrings &GetAlgorithmNames();
 
    static SpectrogramSettings &defaults();
    SpectrogramSettings();

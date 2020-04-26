@@ -23,22 +23,22 @@ other settings.
 *//********************************************************************/
 
 #include "../Audacity.h"
+#include "DevicePrefs.h"
+
+#include "RecordingPrefs.h"
 
 #include <wx/defs.h>
 
 #include <wx/choice.h>
 #include <wx/intl.h>
 #include <wx/log.h>
+#include <wx/textctrl.h>
 
 #include "portaudio.h"
 
-#include "../AudioIO.h"
-#include "../Internat.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 #include "../DeviceManager.h"
-
-#include "DevicePrefs.h"
 
 enum {
    HostID = 10000,
@@ -53,13 +53,29 @@ BEGIN_EVENT_TABLE(DevicePrefs, PrefsPanel)
 END_EVENT_TABLE()
 
 DevicePrefs::DevicePrefs(wxWindow * parent, wxWindowID winid)
-:  PrefsPanel(parent, winid, _("Devices"))
+:  PrefsPanel(parent, winid, XO("Devices"))
 {
    Populate();
 }
 
 DevicePrefs::~DevicePrefs()
 {
+}
+
+
+ComponentInterfaceSymbol DevicePrefs::GetSymbol()
+{
+   return DEVICE_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString DevicePrefs::GetDescription()
+{
+   return XO("Preferences for Device");
+}
+
+wxString DevicePrefs::HelpPageName()
+{
+   return "Devices_Preferences";
 }
 
 void DevicePrefs::Populate()
@@ -85,6 +101,7 @@ void DevicePrefs::Populate()
    OnHost(e);
 }
 
+
 /*
  * Get names of device hosts.
  */
@@ -98,9 +115,10 @@ void DevicePrefs::GetNamesAndLabels()
       const PaDeviceInfo *info = Pa_GetDeviceInfo(i);
       if ((info!=NULL)&&(info->maxOutputChannels > 0 || info->maxInputChannels > 0)) {
          wxString name = wxSafeConvertMB2WX(Pa_GetHostApiInfo(info->hostApi)->name);
-         if (mHostNames.Index(name) == wxNOT_FOUND) {
-            mHostNames.Add(name);
-            mHostLabels.Add(name);
+         if (!make_iterator_range(mHostNames)
+            .contains( Verbatim( name ) )) {
+            mHostNames.push_back( Verbatim( name ) );
+            mHostLabels.push_back(name);
          }
       }
    }
@@ -108,55 +126,51 @@ void DevicePrefs::GetNamesAndLabels()
 
 void DevicePrefs::PopulateOrExchange(ShuttleGui & S)
 {
-   wxArrayString empty;
-
    S.SetBorder(2);
    S.StartScroller();
 
-   S.StartStatic(_("Interface"));
+   S.StartStatic(XO("Interface"));
    {
       S.StartMultiColumn(2);
       {
          S.Id(HostID);
-         mHost = S.TieChoice(_("&Host:"),
-                             wxT("/AudioIO/Host"),
-                             wxT(""),
-                             mHostNames,
-                             mHostLabels);
+         mHost = S.TieChoice( XO("&Host:"),
+            {
+               wxT("/AudioIO/Host"),
+               { ByColumns, mHostNames, mHostLabels }
+            }
+         );
 
-         S.AddPrompt(_("Using:"));
-         S.AddFixedText(wxString(wxSafeConvertMB2WX(Pa_GetVersionText())));
+         S.AddPrompt(XO("Using:"));
+         S.AddFixedText( Verbatim(wxSafeConvertMB2WX(Pa_GetVersionText() ) ) );
       }
       S.EndMultiColumn();
    }
    S.EndStatic();
 
-   S.StartStatic(_("Playback"));
+   S.StartStatic(XO("Playback"));
    {
       S.StartMultiColumn(2);
       {
          S.Id(PlayID);
-         mPlay = S.AddChoice(_("&Device:"),
-                             wxEmptyString,
-                             &empty);
+         mPlay = S.AddChoice(XO("&Device:"),
+                             {} );
       }
       S.EndMultiColumn();
    }
    S.EndStatic();
 
-   S.StartStatic(_("Recording"));
+   S.StartStatic(XO("Recording"));
    {
       S.StartMultiColumn(2);
       {
          S.Id(RecordID);
-         mRecord = S.AddChoice(_("De&vice:"),
-                               wxEmptyString,
-                               &empty);
+         mRecord = S.AddChoice(XO("De&vice:"),
+                               {} );
 
          S.Id(ChannelsID);
-         mChannels = S.AddChoice(_("Cha&nnels:"),
-                                 wxEmptyString,
-                                 &empty);
+         mChannels = S.AddChoice(XO("Cha&nnels:"),
+                                 {} );
       }
       S.EndMultiColumn();
    }
@@ -165,26 +179,28 @@ void DevicePrefs::PopulateOrExchange(ShuttleGui & S)
    // These previously lived in recording preferences.
    // However they are liable to become device specific.
    // Buffering also affects playback, not just recording, so is a device characteristic.
-   S.StartStatic( _("Latency"));
+   S.StartStatic( XO("Latency"));
    {
       S.StartThreeColumn();
       {
          wxTextCtrl *w;
          // only show the following controls if we use Portaudio v19, because
          // for Portaudio v18 we always use default buffer sizes
-         w = S.TieNumericTextBox(_("&Buffer length:"),
-                                 wxT("/AudioIO/LatencyDuration"),
-                                 DEFAULT_LATENCY_DURATION,
+         w = S
+            .NameSuffix(XO("milliseconds"))
+            .TieNumericTextBox(XO("&Buffer length:"),
+                                 {wxT("/AudioIO/LatencyDuration"),
+                                  DEFAULT_LATENCY_DURATION},
                                  9);
-         S.AddUnits(_("milliseconds"));
-         if( w ) w->SetName(w->GetName() + wxT(" ") + _("milliseconds"));
+         S.AddUnits(XO("milliseconds"));
 
-         w = S.TieNumericTextBox(_("Track &shift after record:"),
-                                 wxT("/AudioIO/LatencyCorrection"),
-                                 DEFAULT_LATENCY_CORRECTION,
+         w = S
+            .NameSuffix(XO("milliseconds"))
+            .TieNumericTextBox(XO("&Latency compensation:"),
+                                 {wxT("/AudioIO/LatencyCorrection"),
+                                  DEFAULT_LATENCY_CORRECTION},
                                  9);
-         S.AddUnits(_("milliseconds"));
-         if( w ) w->SetName(w->GetName() + wxT(" ") + _("milliseconds"));
+         S.AddUnits(XO("milliseconds"));
       }
       S.EndThreeColumn();
    }
@@ -201,7 +217,7 @@ void DevicePrefs::OnHost(wxCommandEvent & e)
 
    // Find the index for the host API selected
    int index = -1;
-   wxString apiName = mHostNames[mHost->GetCurrentSelection()];
+   auto apiName = mHostLabels[mHost->GetCurrentSelection()];
    int nHosts = Pa_GetHostApiCount();
    for (int i = 0; i < nHosts; ++i) {
       wxString name = wxSafeConvertMB2WX(Pa_GetHostApiInfo(i)->name);
@@ -236,7 +252,7 @@ void DevicePrefs::OnHost(wxCommandEvent & e)
    wxString recDevice;
 
    recDevice = mRecordDevice;
-   if (this->mRecordSource != wxT(""))
+   if (!this->mRecordSource.empty())
       recDevice += wxT(": ") + mRecordSource;
 
    mRecord->Clear();
@@ -267,12 +283,12 @@ void DevicePrefs::OnHost(wxCommandEvent & e)
 
    /* deal with not having any devices at all */
    if (mPlay->GetCount() == 0) {
-      playnames.Add(_("No devices found"));
+      playnames.push_back(_("No devices found"));
       mPlay->Append(playnames[0], (void *) NULL);
       mPlay->SetSelection(0);
    }
    if (mRecord->GetCount() == 0) {
-      recordnames.Add(_("No devices found"));
+      recordnames.push_back(_("No devices found"));
       mRecord->Append(recordnames[0], (void *) NULL);
       mRecord->SetSelection(0);
    }
@@ -300,9 +316,8 @@ void DevicePrefs::OnHost(wxCommandEvent & e)
       }
    }
 
-   ShuttleGui S(this, eIsCreating);
-   S.SetSizeHints(mPlay, mPlay->GetStrings());
-   S.SetSizeHints(mRecord, mRecord->GetStrings());
+   ShuttleGui::SetMinSize(mPlay, mPlay->GetStrings());
+   ShuttleGui::SetMinSize(mRecord, mRecord->GetStrings());
    OnDevice(e);
 }
 
@@ -332,14 +347,14 @@ void DevicePrefs::OnDevice(wxCommandEvent & WXUNUSED(event))
       cnt = 16;
    }
 
-   // Place an artifical limit on the number of channels to prevent an
+   // Place an artificial limit on the number of channels to prevent an
    // outrageous number.  I don't know if this is really necessary, but
    // it doesn't hurt.
    if (cnt > 256) {
       cnt = 256;
    }
 
-   wxArrayString channelnames;
+   wxArrayStringEx channelnames;
 
    // Channel counts, mono, stereo etc...
    for (int i = 0; i < cnt; i++) {
@@ -355,7 +370,7 @@ void DevicePrefs::OnDevice(wxCommandEvent & WXUNUSED(event))
          name = wxString::Format(wxT("%d"), i + 1);
       }
 
-      channelnames.Add(name);
+      channelnames.push_back(name);
       int index = mChannels->Append(name);
       if (i == mRecordChannels - 1) {
          mChannels->SetSelection(index);
@@ -366,8 +381,7 @@ void DevicePrefs::OnDevice(wxCommandEvent & WXUNUSED(event))
       mChannels->SetSelection(0);
    }
 
-   ShuttleGui S(this, eIsCreating);
-   S.SetSizeHints(mChannels, channelnames);
+   ShuttleGui::SetMinSize(mChannels, channelnames);
    Layout();
 }
 
@@ -408,13 +422,12 @@ bool DevicePrefs::Commit()
    return true;
 }
 
-wxString DevicePrefs::HelpPageName()
-{
-   return "Devices_Preferences";
-}
-
-PrefsPanel *DevicePrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew DevicePrefs(parent, winid);
+namespace{
+PrefsPanel::Registration sAttachment{ "Device",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew DevicePrefs(parent, winid);
+   }
+};
 }

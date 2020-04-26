@@ -8,22 +8,14 @@
 
 #include "../Audacity.h"
 #include "NotYetAvailableException.h"
-#include "../Internat.h"
 
 NotYetAvailableException::~NotYetAvailableException()
 {
 }
 
-std::unique_ptr< AudacityException > NotYetAvailableException::Move()
+TranslatableString NotYetAvailableException::ErrorMessage() const
 {
-   return std::unique_ptr< AudacityException >
-   { safenew NotYetAvailableException{ std::move( *this ) } };
-}
-
-wxString NotYetAvailableException::ErrorMessage() const
-{
-   return wxString::Format(
-      _("This operation cannot be done until importation of %s completes."),
-      fileName.GetFullName()
-   );
+   return
+      XO("This operation cannot be done until importation of %s completes.")
+         .Format( fileName.GetFullName() );
 }

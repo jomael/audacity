@@ -14,9 +14,13 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
+#include "../Audacity.h" // for USE_* macros
 #include "PrefsDialog.h"
 
+#include <mutex> // for std::call_once
+
+#include <wx/app.h>
+#include <wx/setup.h> // for wxUSE_* macros
 #include <wx/defs.h>
 #include <wx/button.h>
 #include <wx/dialog.h>
@@ -30,50 +34,349 @@
 #include <wx/listbook.h>
 
 #include <wx/treebook.h>
+#include <wx/treectrl.h>
 
-#include "../AudioIO.h"
-#include "../Experimental.h"
-#include "../Project.h"
+#include "../AudioIOBase.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
+#include "../commands/CommandManager.h"
 
 #include "PrefsPanel.h"
 
-#include "BatchPrefs.h"
-#include "DevicePrefs.h"
-#include "DirectoriesPrefs.h"
-#include "EffectsPrefs.h"
-#include "GUIPrefs.h"
-#include "ImportExportPrefs.h"
-#include "KeyConfigPrefs.h"
-#include "LibraryPrefs.h"
-#include "MousePrefs.h"
-#ifdef EXPERIMENTAL_MODULE_PREFS
-#include "ModulePrefs.h"
-#endif
-#include "PlaybackPrefs.h"
-#include "ProjectsPrefs.h"
-#include "QualityPrefs.h"
-#include "RecordingPrefs.h"
-#include "SpectrumPrefs.h"
-#include "ThemePrefs.h"
-#include "TracksPrefs.h"
-#include "TracksBehaviorsPrefs.h"
-#include "WarningsPrefs.h"
-// #include "WaveformPrefs.h"
-#include "WaveformSettings.h"
-#include "ExtImportPrefs.h"
-
-#ifdef EXPERIMENTAL_MIDI_OUT
-#include "MidiIOPrefs.h"
-#endif
-
-#include "../Theme.h"
 #include "../widgets/HelpSystem.h"
 
 #if wxUSE_ACCESSIBILITY
 #include "../widgets/WindowAccessible.h"
 #endif
+
+
+#if wxUSE_ACCESSIBILITY
+
+#ifndef __WXMAC__
+
+// Just an alias
+using TreeCtrlAx = WindowAccessible;
+
+#else
+
+// utility functions
+namespace {
+   template< typename Result, typename Fn >
+   Result VisitItems( const wxTreeCtrl &ctrl, Fn fn )
+   {
+      // Do preorder visit of items in the tree until satisfying a test
+      std::vector< wxTreeItemId > stack;
+      stack.push_back( ctrl.GetRootItem() );
+      unsigned position = 0;
+      while ( !stack.empty() ) {
+         auto itemId = stack.back();
+         auto pair = fn( itemId, position );
+         if ( pair.first )
+            return pair.second;
+
+         wxTreeItemIdValue cookie;
+         auto childId = ctrl.GetFirstChild( itemId, cookie );
+         if ( childId )
+            stack.push_back( childId );
+         else do {
+            auto &id = stack.back();
+            if ( !!( id = ctrl.GetNextSibling( id ) ) )
+               break;
+         } while ( stack.pop_back(), !stack.empty() );
+         
+         ++position;
+      }
+      return {};
+   }
+   
+   unsigned FindItemPosition( const wxTreeCtrl &ctrl, wxTreeItemId id )
+   {
+      // Return the 1-based count of the item's position in the pre-order
+      // visit of the items in the tree (not counting the root item which we
+      // assume is a dummy that never matches id)
+      return VisitItems<unsigned>( ctrl,
+         [=]( wxTreeItemId itemId, unsigned position ){
+            return std::make_pair( itemId == id, position ); } );
+   }
+   
+   wxTreeItemId FindItem( const wxTreeCtrl &ctrl, int nn )
+   {
+      // The inverse of the function above
+      return VisitItems<wxTreeItemId>( ctrl,
+         [=]( wxTreeItemId itemId, unsigned position ){
+            return std::make_pair( nn == position, itemId ); } );
+   }
+}
+
+// Define a custom class
+class TreeCtrlAx final
+   : public WindowAccessible
+{
+public:
+   TreeCtrlAx(wxTreeCtrl * ctrl);
+   virtual ~ TreeCtrlAx();
+
+   wxAccStatus GetChild(int childId, wxAccessible** child) override;
+
+   wxAccStatus GetChildCount(int* childCount) override;
+
+   wxAccStatus GetDefaultAction(int childId, wxString *actionName) override;
+
+   // Returns the description for this object or a child.
+   wxAccStatus GetDescription(int childId, wxString *description) override;
+
+   // Gets the window with the keyboard focus.
+   // If childId is 0 and child is NULL, no object in
+   // this subhierarchy has the focus.
+   // If this object has the focus, child should be 'this'.
+   wxAccStatus GetFocus(int *childId, wxAccessible **child) override;
+
+   // Returns help text for this object or a child, similar to tooltip text.
+   wxAccStatus GetHelpText(int childId, wxString *helpText) override;
+
+   // Returns the keyboard shortcut for this object or child.
+   // Return e.g. ALT+K
+   wxAccStatus GetKeyboardShortcut(int childId, wxString *shortcut) override;
+
+   // Returns the rectangle for this object (id = 0) or a child element (id > 0).
+   // rect is in screen coordinates.
+   wxAccStatus GetLocation(wxRect& rect, int elementId) override;
+
+   // Gets the name of the specified object.
+   wxAccStatus GetName(int childId, wxString *name) override;
+
+   // Returns a role constant.
+   wxAccStatus GetRole(int childId, wxAccRole *role) override;
+
+   // Gets a variant representing the selected children
+   // of this object.
+   // Acceptable values:
+   // - a null variant (IsNull() returns TRUE)
+   // - a list variant (GetType() == wxT("list"))
+   // - an integer representing the selected child element,
+   //   or 0 if this object is selected (GetType() == wxT("long"))
+   // - a "void*" pointer to a wxAccessible child object
+   //wxAccStatus GetSelections(wxVariant *selections) override;
+   // leave unimplemented
+
+   // Returns a state constant.
+   wxAccStatus GetState(int childId, long* state) override;
+
+   // Returns a localized string representing the value for the object
+   // or child.
+   wxAccStatus GetValue(int childId, wxString* strValue) override;
+
+   // Navigates from fromId to toId/toObject
+   // wxAccStatus Navigate(wxNavDir navDir, int fromId, int* toId, wxAccessible** toObject) override;
+
+   // Modify focus or selection
+   wxAccStatus Select(int childId, wxAccSelectionFlags selectFlags) override;
+
+private:
+   wxTreeCtrl *GetCtrl() { return static_cast<wxTreeCtrl*>( GetWindow() ); }
+};
+
+TreeCtrlAx::TreeCtrlAx( wxTreeCtrl *ctrl )
+: WindowAccessible{ ctrl }
+{
+}
+
+TreeCtrlAx::~TreeCtrlAx() = default;
+
+wxAccStatus TreeCtrlAx::GetChild( int childId, wxAccessible** child )
+{
+   if( childId == wxACC_SELF )
+   {
+      *child = this;
+   }
+   else
+   {
+      *child = NULL;
+   }
+
+   return wxACC_OK;
+}
+
+wxAccStatus TreeCtrlAx::GetChildCount(int* childCount)
+{
+   auto ctrl = GetCtrl();
+   if (!ctrl)
+      return wxACC_FAIL;
+
+   *childCount = ctrl->GetCount();
+   return wxACC_OK;
+}
+
+wxAccStatus TreeCtrlAx::GetDefaultAction(int WXUNUSED(childId), wxString* actionName)
+{
+   actionName->clear();
+
+   return wxACC_OK;
+}
+
+// Returns the description for this object or a child.
+wxAccStatus TreeCtrlAx::GetDescription( int WXUNUSED(childId), wxString *description )
+{
+   description->clear();
+
+   return wxACC_OK;
+}
+
+// This isn't really used yet by wxWidgets as patched by Audacity for
+// Mac accessibility, as of Audacity 2.3.2, but here it is anyway, keeping the
+// analogy with TrackPanelAx
+wxAccStatus TreeCtrlAx::GetFocus( int *childId, wxAccessible **child )
+{
+   auto ctrl = GetCtrl();
+   if (!ctrl)
+      return wxACC_FAIL;
+
+   auto item = ctrl->GetFocusedItem();
+   auto id = FindItemPosition( *ctrl, item );
+   *childId = id;
+   *child = nullptr;
+   return wxACC_OK;
+}
+
+// Returns help text for this object or a child, similar to tooltip text.
+wxAccStatus TreeCtrlAx::GetHelpText( int WXUNUSED(childId), wxString *helpText )
+{
+   helpText->clear();
+
+   return wxACC_OK;
+}
+
+// Returns the keyboard shortcut for this object or child.
+// Return e.g. ALT+K
+wxAccStatus TreeCtrlAx::GetKeyboardShortcut( int WXUNUSED(childId), wxString *shortcut )
+{
+   shortcut->clear();
+
+   return wxACC_OK;
+}
+
+wxAccStatus TreeCtrlAx::GetLocation( wxRect& rect, int elementId )
+{
+   auto ctrl = GetCtrl();
+   if (!ctrl)
+      return wxACC_FAIL;
+
+   if (elementId == wxACC_SELF)
+      rect = ctrl->GetRect();
+   else {
+      auto item = FindItem( *ctrl, elementId );
+      if ( !( item && ctrl->GetBoundingRect( item, rect ) ) )
+         return wxACC_INVALID_ARG;
+   }
+   rect.SetPosition( ctrl->GetParent()->ClientToScreen( rect.GetPosition() ) );
+   return wxACC_OK;
+}
+
+wxAccStatus TreeCtrlAx::GetName(int childId, wxString* name)
+{
+   if ( childId == wxACC_SELF )
+      return WindowAccessible::GetName( childId, name );
+   else {
+      auto ctrl = GetCtrl();
+      if (!ctrl)
+         return wxACC_FAIL;
+
+      auto item = FindItem( *ctrl, childId );
+      if ( item ) {
+         *name = ctrl->GetItemText( item );
+         return wxACC_OK;
+      }
+      else
+         return wxACC_INVALID_ARG;
+   }
+}
+
+wxAccStatus TreeCtrlAx::GetRole( int childId, wxAccRole* role )
+{
+   // Not sure if this correct, but it is analogous with what we use in
+   // TrackPanel
+   *role =
+      childId == wxACC_SELF ? wxROLE_SYSTEM_PANE : wxROLE_SYSTEM_STATICTEXT;
+   return wxACC_OK;
+}
+
+// Returns a state constant.
+wxAccStatus TreeCtrlAx::GetState(int childId, long* state)
+{
+   auto ctrl = GetCtrl();
+   if (!ctrl)
+      return wxACC_FAIL;
+
+   *state = wxACC_STATE_SYSTEM_FOCUSABLE | wxACC_STATE_SYSTEM_SELECTABLE;
+
+   if ( childId != wxACC_SELF ) {
+      auto item = FindItem( *ctrl, childId );
+      if (item) {
+         if( item == ctrl->GetFocusedItem() )
+            *state |= wxACC_STATE_SYSTEM_FOCUSED;
+
+         if( item == ctrl->GetSelection() )
+            *state |= wxACC_STATE_SYSTEM_SELECTED;
+      }
+   }
+
+   return wxACC_OK;
+}
+
+// Returns a localized string representing the value for the object
+// or child.
+wxAccStatus TreeCtrlAx::GetValue(int childId, wxString* strValue)
+{
+   *strValue = wxString{};
+   return wxACC_OK;
+}
+
+//wxAccStatus TreeCtrlAx::Navigate(
+//   wxNavDir navDir, int fromId, int* toId, wxAccessible** toObject)
+//{
+//   to do
+//}
+
+// Modify focus or selection
+wxAccStatus TreeCtrlAx::Select(int childId, wxAccSelectionFlags selectFlags)
+{
+   auto ctrl = GetCtrl();
+   if (!ctrl)
+      return wxACC_FAIL;
+
+   if (childId != wxACC_SELF) {
+      int childCount;
+      GetChildCount( &childCount );
+      if (childId > childCount)
+           return wxACC_FAIL;
+
+      auto item = FindItem( *ctrl, childId );
+      if ( item ) {
+         if (selectFlags == wxACC_SEL_TAKEFOCUS)
+            ctrl->SetFocusedItem( item );
+         else if (selectFlags == wxACC_SEL_TAKESELECTION)
+            ctrl->SelectItem( item );
+         else
+            return wxACC_NOT_IMPLEMENTED;
+         return wxACC_OK;
+      }
+   }
+
+   return wxACC_NOT_IMPLEMENTED;
+}
+
+#endif
+
+#endif
+
+
+// PrefsPanel might move out into its own file in due ocurse.
+PluginPath PrefsPanel::GetPath(){      return BUILTIN_PREFS_PANEL_PREFIX + GetSymbol().Internal(); }
+VendorSymbol PrefsPanel::GetVendor(){  return XO("Audacity");}
+wxString PrefsPanel::GetVersion(){     return AUDACITY_VERSION_STRING;}
+
+
+
 
 BEGIN_EVENT_TABLE(PrefsDialog, wxDialogWrapper)
    EVT_BUTTON(wxID_OK, PrefsDialog::OnOK)
@@ -88,14 +391,14 @@ class wxTreebookExt final : public wxTreebook
 {
 public:
    wxTreebookExt( wxWindow *parent,
-      wxWindowID id, const wxString &titlePrefix)
+      wxWindowID id, const TranslatableString &titlePrefix)
       : wxTreebook( parent, id )
       , mTitlePrefix(titlePrefix)
    {;};
    ~wxTreebookExt(){;};
    int ChangeSelection(size_t n) override;
    int SetSelection(size_t n) override;
-   const wxString mTitlePrefix;
+   const TranslatableString mTitlePrefix;
 };
 
 
@@ -110,12 +413,12 @@ int wxTreebookExt::ChangeSelection(size_t n) {
 int wxTreebookExt::SetSelection(size_t n)
 {
    int i = wxTreebook::SetSelection(n);
-   wxString Temp = wxString(mTitlePrefix) + GetPageText( n );
+   auto Temp = mTitlePrefix.Translation() + wxT(" ") + GetPageText( n );
    static_cast<wxDialog*>(GetParent())->SetTitle( Temp );
    static_cast<wxDialog*>(GetParent())->SetName( Temp );
 
    PrefsPanel *const panel = static_cast<PrefsPanel *>(GetPage(n));
-   const bool showHelp = (panel->HelpPageName() != wxEmptyString);
+   const bool showHelp = (!panel->HelpPageName().empty());
    const bool showPreview = panel->ShowsPreviewButton();
    wxWindow *const helpButton = wxWindow::FindWindowById(wxID_HELP, GetParent());
    wxWindow *const previewButton = wxWindow::FindWindowById(wxID_PREVIEW, GetParent());
@@ -149,90 +452,111 @@ int wxTreebookExt::SetSelection(size_t n)
    return i;
 }
 
+namespace {
 
+struct PrefsItem final : Registry::ConcreteGroupItem<false> {
+   PrefsPanel::Factory factory;
+   bool expanded{ false };
+
+   PrefsItem( const wxString &name,
+      const PrefsPanel::Factory &factory_, bool expanded_ )
+         : ConcreteGroupItem<false>{ name }
+         , factory{ factory_ }, expanded{ expanded_ }
+   {}
+};
+
+// Collects registry tree nodes into a vector, in preorder.
+struct PrefsItemVisitor final : Registry::Visitor {
+   PrefsItemVisitor( PrefsDialog::Factories &factories_ )
+      : factories{ factories_ }
+   {
+      childCounts.push_back( 0 );
+   }
+   void BeginGroup( Registry::GroupItem &item, const Path & ) override
+   {
+      auto pItem = dynamic_cast<PrefsItem*>( &item );
+      if (!pItem)
+         return;
+      indices.push_back( factories.size() );
+      factories.emplace_back( pItem->factory, 0, pItem->expanded );
+      ++childCounts.back();
+      childCounts.push_back( 0 );
+   }
+   void EndGroup( Registry::GroupItem &item, const Path & ) override
+   {
+      auto pItem = dynamic_cast<PrefsItem*>( &item );
+      if (!pItem)
+         return;
+      auto &factory = factories[ indices.back() ];
+      factory.nChildren = childCounts.back();
+      childCounts.pop_back();
+      indices.pop_back();
+   }
+
+   PrefsDialog::Factories &factories;
+   std::vector<size_t> childCounts;
+   std::vector<size_t> indices;
+};
+
+
+const auto PathStart = wxT("Preferences");
+   
+}
+
+
+namespace {
+static Registry::GroupItem &sRegistry()
+{
+   static Registry::TransparentGroupItem<> registry{ PathStart };
+   return registry;
+}
+}
+
+PrefsPanel::Registration::Registration( const wxString &name,
+   const Factory &factory, bool expanded,
+   const Registry::Placement &placement )
+{
+   Registry::RegisterItem( sRegistry(), placement,
+      std::make_unique< PrefsItem >( name, factory, expanded ) );
+}
 
 PrefsDialog::Factories
 &PrefsDialog::DefaultFactories()
 {
-   // To do, perhaps:  create this table by registration, without including each PrefsPanel
-   // class... and thus allowing a plug-in protocol
-   static DevicePrefsFactory devicePrefsFactory;
-   static PlaybackPrefsFactory playbackPrefsFactory;
-   static RecordingPrefsFactory recordingPrefsFactory;
-#ifdef EXPERIMENTAL_MIDI_OUT
-   static MidiIOPrefsFactory midiIOPrefsFactory;
-#endif
-   static QualityPrefsFactory qualityPrefsFactory;
-   static GUIPrefsFactory guiPrefsFactory;
-   static TracksPrefsFactory tracksPrefsFactory;
-   static ImportExportPrefsFactory importExportPrefsFactory;
-   static ExtImportPrefsFactory extImportPrefsFactory;
-   static ProjectsPrefsFactory projectsPrefsFactory;
-#if !defined(DISABLE_DYNAMIC_LOADING_FFMPEG) || !defined(DISABLE_DYNAMIC_LOADING_LAME)
-   static LibraryPrefsFactory libraryPrefsFactory;
-#endif
-   // static WaveformPrefsFactory waveformPrefsFactory;
-   static TracksBehaviorsPrefsFactory tracksBehaviorsPrefsFactory;
-   static SpectrumPrefsFactory spectrumPrefsFactory;
-   static DirectoriesPrefsFactory directoriesPrefsFactory;
-   static WarningsPrefsFactory warningsPrefsFactory;
-   static EffectsPrefsFactory effectsPrefsFactory;
-#ifdef EXPERIMENTAL_THEME_PREFS
-   static ThemePrefsFactory themePrefsFactory;
-#endif
-   // static BatchPrefsFactory batchPrefsFactory;
-   static KeyConfigPrefsFactory keyConfigPrefsFactory;
-   static MousePrefsFactory mousePrefsFactory;
-#ifdef EXPERIMENTAL_MODULE_PREFS
-   static ModulePrefsFactory modulePrefsFactory;
-#endif
-
-   static PrefsNode nodes[] = {
-      &devicePrefsFactory,
-      &playbackPrefsFactory,
-      &recordingPrefsFactory,
-#ifdef EXPERIMENTAL_MIDI_OUT
-      &midiIOPrefsFactory,
-#endif
-      &qualityPrefsFactory,
-      &guiPrefsFactory,
-
-      // Group other page(s)
-      PrefsNode(&tracksPrefsFactory, 2),
-      // &waveformPrefsFactory,
-      &tracksBehaviorsPrefsFactory,
-      &spectrumPrefsFactory,
-
-      // Group one other page
-      PrefsNode(&importExportPrefsFactory, 1),
-      &extImportPrefsFactory,
-
-      &projectsPrefsFactory,
-#if !defined(DISABLE_DYNAMIC_LOADING_FFMPEG) || !defined(DISABLE_DYNAMIC_LOADING_LAME)
-      &libraryPrefsFactory,
-#endif
-      &directoriesPrefsFactory,
-      &warningsPrefsFactory,
-      &effectsPrefsFactory,
-#ifdef EXPERIMENTAL_THEME_PREFS
-      &themePrefsFactory,
-#endif
-      // &batchPrefsFactory,
-      &keyConfigPrefsFactory,
-      &mousePrefsFactory,
-#ifdef EXPERIMENTAL_MODULE_PREFS
-      &modulePrefsFactory,
-#endif
+   // Once only, cause initial population of preferences for the ordering
+   // of some preference pages that used to be given in a table but are now
+   // separately registered in several .cpp files; the sequence of registration
+   // depends on unspecified accidents of static initialization order across
+   // compilation units, so we need something specific here to preserve old
+   // default appearance of the preference dialog.
+   // But this needs only to mention some strings -- there is no compilation or
+   // link dependency of this source file on those other implementation files.
+   static Registry::OrderingPreferenceInitializer init{
+      PathStart,
+      {
+         {wxT(""),
+       wxT("Device,Playback,Recording,Quality,GUI,Tracks,ImportExport,Directories,Warnings,Effects,KeyConfig,Mouse")
+         },
+         {wxT("/Tracks"), wxT("TracksBehaviors,Spectrum")},
+      }
    };
 
-   static Factories factories(nodes, nodes + sizeof(nodes) / sizeof(nodes[0]));
+   static Factories factories;
+   static std::once_flag flag;
+
+   std::call_once( flag, []{
+      PrefsItemVisitor visitor{ factories };
+      Registry::TransparentGroupItem<> top{ PathStart };
+      Registry::Visit( visitor, &top, &sRegistry() );
+   } );
    return factories;
 }
 
 
-PrefsDialog::PrefsDialog
-  (wxWindow * parent, const wxString &titlePrefix, Factories &factories)
-:  wxDialogWrapper(parent, wxID_ANY, wxString(_("Audacity Preferences")),
+PrefsDialog::PrefsDialog(
+   wxWindow * parent, AudacityProject *pProject,
+   const TranslatableString &titlePrefix, Factories &factories)
+:  wxDialogWrapper(parent, wxID_ANY, XO("Audacity Preferences"),
             wxDefaultPosition,
             wxDefaultSize,
             wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
@@ -241,6 +565,7 @@ PrefsDialog::PrefsDialog
 {
    wxASSERT(factories.size() > 0);
    const bool uniquePage = (factories.size() == 1);
+   SetLayoutDirection(wxLayout_LeftToRight);
 
    ShuttleGui S(this, eIsCreating);
 
@@ -248,17 +573,19 @@ PrefsDialog::PrefsDialog
    {
       wxASSERT(factories.size() > 0);
       if (!uniquePage) {
-         mCategories = safenew wxTreebookExt(this, wxID_ANY, mTitlePrefix);
+         mCategories = safenew wxTreebookExt(S.GetParent(), wxID_ANY, mTitlePrefix);
 #if wxUSE_ACCESSIBILITY
          // so that name can be set on a standard control
-         mCategories->GetTreeCtrl()->SetAccessible(safenew WindowAccessible(mCategories->GetTreeCtrl()));
+         mCategories->GetTreeCtrl()->SetAccessible(
+            safenew TreeCtrlAx(mCategories->GetTreeCtrl()));
 #endif
          // RJH: Prevent NVDA from reading "treeCtrl"
          mCategories->GetTreeCtrl()->SetName(_("Category"));
          S.StartHorizontalLay(wxALIGN_LEFT | wxEXPAND, true);
          {
-            S.Prop(1);
-            S.AddWindow(mCategories, wxEXPAND);
+            S.Prop(1)
+               .Position(wxEXPAND)
+               .AddWindow(mCategories);
 
             {
                typedef std::pair<int, int> IntPair;
@@ -268,8 +595,8 @@ PrefsDialog::PrefsDialog
                   it != end; ++it, ++iPage)
                {
                   const PrefsNode &node = *it;
-                  PrefsPanelFactory &factory = *node.pFactory;
-                  wxWindow *const w = factory(mCategories, wxID_ANY);
+                  const PrefsPanel::Factory &factory = node.factory;
+                  wxWindow *const w = factory(mCategories, wxID_ANY, pProject);
                   if (stack.empty())
                      // Parameters are: AddPage(page, name, IsSelected, imageId).
                      mCategories->AddPage(w, w->GetName(), false, 0);
@@ -296,9 +623,11 @@ PrefsDialog::PrefsDialog
 
          // Unique page, don't show the factory
          const PrefsNode &node = factories[0];
-         PrefsPanelFactory &factory = *node.pFactory;
-         mUniquePage = factory(this, wxID_ANY);
-         wxWindow * uniquePageWindow = S.Prop(1).AddWindow(mUniquePage, wxEXPAND);
+         const PrefsPanel::Factory &factory = node.factory;
+         mUniquePage = factory(S.GetParent(), wxID_ANY, pProject);
+         wxWindow * uniquePageWindow = S.Prop(1)
+            .Position(wxEXPAND)
+            .AddWindow(mUniquePage);
          // We're not in the wxTreebook, so add the accelerator here
          wxAcceleratorEntry entries[1];
 #if defined(__WXMAC__)
@@ -313,7 +642,6 @@ PrefsDialog::PrefsDialog
    S.EndVerticalLay();
 
    S.AddStandardButtons(eOkButton | eCancelButton | ePreviewButton | eHelpButton);
-   static_cast<wxButton*>(wxWindow::FindWindowById(wxID_OK, this))->SetDefault();
 
    if (mUniquePage && !mUniquePage->ShowsPreviewButton()) {
       wxWindow *const previewButton =
@@ -326,7 +654,7 @@ PrefsDialog::PrefsDialog
       mCategories->GetTreeCtrl()->EnsureVisible(mCategories->GetTreeCtrl()->GetRootItem());
 #endif
 
-//   mCategories->SetSizeHints(-1, -1, 790, 600);  // 790 = 800 - (border * 2)
+//   mCategories->SetMaxSize({ 790, 600 });  // 790 = 800 - (border * 2)
    Layout();
    Fit();
    wxSize sz = GetSize();
@@ -388,7 +716,8 @@ int PrefsDialog::ShowModal()
       mCategories->SetSelection(selected);
    }
    else {
-      wxString Temp = mTitlePrefix + mUniquePage->GetLabel();
+      auto Temp = mTitlePrefix;
+      Temp.Join( Verbatim( mUniquePage->GetLabel() ), wxT(" ") );
       SetTitle(Temp);
       SetName(Temp);
    }
@@ -438,13 +767,6 @@ void PrefsDialog::OnPreview(wxCommandEvent & WXUNUSED(event))
 void PrefsDialog::OnHelp(wxCommandEvent & WXUNUSED(event))
 {
    wxString page = GetCurrentPanel()->HelpPageName();
-   // Currently (May2017) Spectrum Settings is the only preferences
-   // we ever display in a dialog on its own without others.
-   // We do so when it is configuring spectrums for a track.
-   // Because this happens, we want to visit a different help page.
-   // So we change the page name in the case of a page on its own.
-   if( !mCategories)
-      page.Replace( "Spectrograms_Preferences", "Spectrogram_Settings" );
    HelpSystem::ShowHelp(this, page, true);
 }
 
@@ -519,13 +841,10 @@ void PrefsDialog::OnOK(wxCommandEvent & WXUNUSED(event))
    }
    gPrefs->Flush();
 
-   // Reads preference /GUI/Theme
-   theTheme.LoadPreferredTheme();
-   theTheme.ApplyUpdatedImages();
-
    SavePreferredPage();
 
 #if USE_PORTMIXER
+   auto gAudioIO = AudioIOBase::Get();
    if (gAudioIO) {
       // We cannot have opened this dialog if gAudioIO->IsAudioTokenActive(),
       // per the setting of AudioIONotBusyFlag and AudioIOBusyFlag in
@@ -550,15 +869,14 @@ void PrefsDialog::OnOK(wxCommandEvent & WXUNUSED(event))
    }
 #endif
 
+   // PRL:  Is the following concern still valid, now that prefs update is
+   //      handled instead by delayed event processing?
+
    // LL:  wxMac can't handle recreating the menus when this dialog is still active,
    //      so AudacityProject::UpdatePrefs() or any of the routines it calls must
-   //      not cause AudacityProject::RebuildMenuBar() to be executed.
-   for (size_t i = 0; i < gAudacityProjects.size(); i++) {
-      gAudacityProjects[i]->UpdatePrefs();
-   }
+   //      not cause MenuCreator::RebuildMenuBar() to be executed.
 
-   WaveformSettings::defaults().LoadPrefs();
-   SpectrogramSettings::defaults().LoadPrefs();
+   wxTheApp->AddPendingEvent(wxCommandEvent{ EVT_PREFS_UPDATE });
 
    if( IsModal() )
       EndModal(true);
@@ -588,8 +906,9 @@ int PrefsDialog::GetSelectedPage() const
       return 0;
 }
 
-GlobalPrefsDialog::GlobalPrefsDialog(wxWindow * parent, Factories &factories)
-   : PrefsDialog(parent, _("Preferences: "), factories)
+GlobalPrefsDialog::GlobalPrefsDialog(
+   wxWindow * parent, AudacityProject *pProject, Factories &factories)
+   : PrefsDialog(parent, pProject, XO("Preferences:"), factories)
 {
 }
 
@@ -639,4 +958,39 @@ bool PrefsPanel::ShowsPreviewButton()
 wxString PrefsPanel::HelpPageName()
 {
    return wxEmptyString;
+}
+
+#include <wx/frame.h>
+#include "../Menus.h"
+#include "../Project.h"
+
+void DoReloadPreferences( AudacityProject &project )
+{
+   {
+      GlobalPrefsDialog dialog(
+         &GetProjectFrame( project ) /* parent */, &project );
+      wxCommandEvent Evt;
+      //dialog.Show();
+      dialog.OnOK(Evt);
+   }
+
+   // LL:  Moved from PrefsDialog since wxWidgets on OSX can't deal with
+   //      rebuilding the menus while the PrefsDialog is still in the modal
+   //      state.
+   for (auto p : AllProjects{}) {
+      MenuManager::Get(*p).RebuildMenuBar(*p);
+// TODO: The comment below suggests this workaround is obsolete.
+#if defined(__WXGTK__)
+      // Workaround for:
+      //
+      //   http://bugzilla.audacityteam.org/show_bug.cgi?id=458
+      //
+      // This workaround should be removed when Audacity updates to wxWidgets
+      // 3.x which has a fix.
+      auto &window = GetProjectFrame( *p );
+      wxRect r = window.GetRect();
+      window.SetSize(wxSize(1,1));
+      window.SetSize(r.GetSize());
+#endif
+   }
 }

@@ -19,9 +19,9 @@ updating the ODPCMAliasBlockFile and the GUI of the newly available data.
 
 
 #include "ODComputeSummaryTask.h"
-#include "../AudacityException.h"
 #include "../blockfile/ODPCMAliasBlockFile.h"
 #include "../Sequence.h"
+#include "../WaveClip.h"
 #include "../WaveTrack.h"
 #include <wx/wx.h>
 
@@ -35,9 +35,9 @@ ODComputeSummaryTask::ODComputeSummaryTask()
    mHasUpdateRan=false;
 }
 
-movable_ptr<ODTask> ODComputeSummaryTask::Clone() const
+std::unique_ptr<ODTask> ODComputeSummaryTask::Clone() const
 {
-   auto clone = make_movable<ODComputeSummaryTask>();
+   auto clone = std::make_unique<ODComputeSummaryTask>();
    clone->mDemandSample = GetDemandSample();
    // This std::move is needed to "upcast" the pointer type
    return std::move(clone);
@@ -66,7 +66,7 @@ void ODComputeSummaryTask::DoSomeInternal()
    }
 
    mBlockFilesMutex.Lock();
-   for(size_t i=0; i < mWaveTracks.size() && mBlockFiles.size();i++)
+   for(size_t j=0; j < mWaveTracks.size() && mBlockFiles.size();j++)
    {
       bool success = false;
       const auto bf = mBlockFiles[0].lock();
@@ -116,8 +116,9 @@ void ODComputeSummaryTask::DoSomeInternal()
          mWaveTrackMutex.Lock();
          for(size_t i=0;i<mWaveTracks.size();i++)
          {
-            if(success && mWaveTracks[i])
-               mWaveTracks[i]->AddInvalidRegion(blockStartSample,blockEndSample);
+            auto waveTrack = mWaveTracks[i].lock();
+            if(success && waveTrack)
+               waveTrack->AddInvalidRegion(blockStartSample,blockEndSample);
          }
          mWaveTrackMutex.Unlock();
       }
@@ -182,13 +183,14 @@ void ODComputeSummaryTask::Update()
 
    for(size_t j=0;j<mWaveTracks.size();j++)
    {
-      if(mWaveTracks[j])
+      auto waveTrack = mWaveTracks[j].lock();
+      if(waveTrack)
       {
          BlockArray *blocks;
          Sequence *seq;
 
          //gather all the blockfiles that we should process in the wavetrack.
-         for (const auto &clip : mWaveTracks[j]->GetAllClips()) {
+         for (const auto &clip : waveTrack->GetAllClips()) {
             seq = clip->GetSequence();
             //This lock may be way too big since the whole file is one sequence.
             //TODO: test for large files and find a way to break it down.

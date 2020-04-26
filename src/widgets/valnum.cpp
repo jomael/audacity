@@ -19,12 +19,16 @@
 // headers
 // ----------------------------------------------------------------------------
 
+#include "../Audacity.h"
+#include "valnum.h"
+
 // For compilers that support precompilation, includes "wx.h".
 #include <wx/wxprec.h>
 
-#include "../Audacity.h"
-#include "valnum.h"
-#include "ErrorDialog.h"
+#include <wx/setup.h> // for wxUSE_* macros
+
+#include "AudacityMessageBox.h"
+#include "../Internat.h"
 
 #ifdef __BORLANDC__
     #pragma hdrstop
@@ -34,13 +38,13 @@
 
 #ifndef WX_PRECOMP
     #include <wx/textctrl.h>
+    #include <wx/combobox.h>
 #endif
 
 #include <wx/clipbrd.h>
 #include <wx/dataobj.h>
 
 #include "numformatter.h"
-#include "../Internat.h"
 
 // ============================================================================
 // NumValidatorBase implementation
@@ -76,6 +80,11 @@ wxTextEntry *NumValidatorBase::GetTextEntry() const
       return text;
 #endif // wxUSE_TEXTCTRL
 
+#if wxUSE_COMBOBOX
+    if ( wxComboBox *combo = wxDynamicCast(m_validatorWindow, wxComboBox) )
+        return combo;
+#endif // wxUSE_COMBOBOX
+
    wxFAIL_MSG(wxT("Can only be used with wxTextCtrl or wxComboBox"));
 
    return NULL;
@@ -87,18 +96,21 @@ bool NumValidatorBase::Validate(wxWindow *parent)
    if ( !m_validatorWindow->IsEnabled() )
       return true;
 
-   wxString errmsg;
+   TranslatableString errmsg;
    bool res = DoValidateNumber(&errmsg);
 
    if ( !res )
    {
-      AudacityMessageBox(errmsg, _("Validation error"),
-                  wxOK | wxICON_ERROR, parent);
+      AudacityMessageBox(
+         errmsg,
+         XO("Validation error"),
+         wxOK | wxICON_ERROR,
+         parent);
       wxTextEntry *te = GetTextEntry();
       if ( te )
       {
          te->SelectAll();
-         te->SetFocus();
+         m_validatorWindow->SetFocus();
       }
       return false;
    }
@@ -230,7 +242,7 @@ void NumValidatorBase::OnPaste(wxClipboardTextEvent& event)
    int pos;
    GetCurrentValueAndInsertionPoint(val, pos);
 
-   for (size_t i = 0, cnt = toPaste.Length(); i < cnt; i++)
+   for (size_t i = 0, cnt = toPaste.length(); i < cnt; i++)
    {
       const wxChar ch = toPaste[i];
 
@@ -339,7 +351,7 @@ IntegerValidatorBase::IsCharOk(const wxString& val, int pos, wxChar ch) const
    return true;
 }
 
-bool IntegerValidatorBase::DoValidateNumber(wxString * errMsg) const
+bool IntegerValidatorBase::DoValidateNumber(TranslatableString * errMsg) const
 {
    wxTextEntry * const control = GetTextEntry();
    if ( !control )
@@ -360,22 +372,22 @@ bool IntegerValidatorBase::DoValidateNumber(wxString * errMsg) const
       // We can't do any check with an empty string
       else
       {
-         *errMsg = _("Empty value");
+         *errMsg = XO("Empty value");
          return false;
       }
    }
 
    // Can it be converted to a value?
-   LongestValueType value;
+   LongestValueType value = 0;
    bool res = FromString(s, &value);
    if ( !res )
-      *errMsg = _("Malformed number");
+      *errMsg = XO("Malformed number");
    else
    {
       res = IsInRange(value);
       if ( !res )
-         errMsg->Printf(_("Not in range %d to %d"),
-                        (int) m_min, (int) m_max);
+         *errMsg = XO("Not in range %d to %d")
+            .Format( (int) m_min, (int) m_max );
    }
 
    return res;
@@ -465,7 +477,7 @@ FloatingPointValidatorBase::IsCharOk(const wxString& val,
    return ValidatePrecision(str);
 }
 
-bool FloatingPointValidatorBase::DoValidateNumber(wxString * errMsg) const
+bool FloatingPointValidatorBase::DoValidateNumber(TranslatableString * errMsg) const
 {
    wxTextEntry * const control = GetTextEntry();
    if ( !control )
@@ -482,20 +494,20 @@ bool FloatingPointValidatorBase::DoValidateNumber(wxString * errMsg) const
          return true; //Is blank, but allowed. Stop here
       else
       {
-         *errMsg = _("Empty value");
+         *errMsg = XO("Empty value");
          return false; //We can't do any checks with an empty string
       }
    }
 
-   LongestValueType value;
+   LongestValueType value = 0;
    bool res = FromString(s, &value); // Can it be converted to a value?
    if ( !res )
-      *errMsg = _("Value overflow");
+      *errMsg = XO("Value overflow");
    else
    {
       res = ValidatePrecision(s);
       if ( !res )
-         *errMsg = _("Too many decimal digits");
+         *errMsg = XO("Too many decimal digits");
       else
       {
          res = IsInRange(value);
@@ -508,16 +520,17 @@ bool FloatingPointValidatorBase::DoValidateNumber(wxString * errMsg) const
 
             if (m_minSet && m_maxSet)
             {
-               errMsg->Printf(_("Value not in range: %s to %s"),
-                              strMin, strMax);
+               *errMsg = XO("Value not in range: %s to %s")
+                  .Format( strMin, strMax );
             }
             else if (m_minSet)
             {
-               errMsg->Printf(_("Value must not be less than %s"), strMin);
+               *errMsg = XO("Value must not be less than %s").Format( strMin );
             }
             else if (m_maxSet)
             {
-               errMsg->Printf(_("Value must not be greather than %s"), strMax);
+               *errMsg = XO("Value must not be greater than %s")
+                  .Format( strMax );
             }
          }
       }
@@ -540,6 +553,11 @@ bool FloatingPointValidatorBase::ValidatePrecision(const wxString& s) const
 
    // Return true if number has no more decimal digits than allowed
    return ( (int)(posExp - posSep) - 1 <= (int)m_precision );
+}
+
+double RoundValue(int precision, double value)
+{
+   return Internat::CompatibleToDouble( Internat::ToString(value, precision) );
 }
 
 #endif // wxUSE_VALIDATORS && wxUSE_TEXTCTRL

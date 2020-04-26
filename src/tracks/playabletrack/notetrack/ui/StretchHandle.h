@@ -13,13 +13,10 @@ Paul Licameli split from TrackPanel.cpp
 
 #include "../../../../UIHandle.h"
 
-#include "../../../../MemoryX.h"
-
 class Alg_seq;
 class NoteTrack;
 class Track;
 class ViewInfo;
-class wxCursor;
 
 class StretchHandle : public UIHandle
 {
@@ -78,7 +75,7 @@ public:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release

@@ -23,24 +23,25 @@ system by constructing BatchCommandEval objects.
 
 #include "../Audacity.h"
 #include "CommandBuilder.h"
-#include "CommandDirectory.h"
-#include "../Shuttle.h"
-#include "BatchEvalCommand.h"
-#include "Command.h"
-#include "CommandTargets.h"
-#include "ScriptCommandRelay.h"
-#include "CommandContext.h"
 
-CommandBuilder::CommandBuilder(const wxString &cmdString)
+#include "CommandDirectory.h"
+#include "Command.h"
+#include "CommandContext.h"
+#include "CommandTargets.h"
+#include "../Shuttle.h"
+
+CommandBuilder::CommandBuilder(
+   AudacityProject *project, const wxString &cmdString)
    : mValid(false)
 {
-   BuildCommand(cmdString);
+   BuildCommand(project, cmdString);
 }
 
-CommandBuilder::CommandBuilder(const wxString &cmdName, const wxString &params)
+CommandBuilder::CommandBuilder(AudacityProject *project,
+   const wxString &cmdName, const wxString &params)
    : mValid(false)
 {
-   BuildCommand(cmdName, params);
+   BuildCommand(project, cmdName, params);
 }
 
 CommandBuilder::~CommandBuilder()
@@ -52,11 +53,6 @@ bool CommandBuilder::WasValid()
    return mValid;
 }
 
-const wxString &CommandBuilder::GetErrorMessage()
-{
-   return mError;
-}
-
 OldStyleCommandPointer CommandBuilder::GetCommand()
 {
    wxASSERT(mValid);
@@ -64,6 +60,14 @@ OldStyleCommandPointer CommandBuilder::GetCommand()
    auto result = mCommand;
    mCommand.reset();
    return result;
+}
+
+wxString CommandBuilder::GetResponse()
+{
+   if (!mValid && !mError.empty()) {
+      return mError + wxT("\n");
+   }
+   return mResponse->GetResponse() + wxT("\n");
 }
 
 void CommandBuilder::Failure(const wxString &msg)
@@ -78,16 +82,17 @@ void CommandBuilder::Success(const OldStyleCommandPointer &cmd)
    mValid = true;
 }
 
-void CommandBuilder::BuildCommand(const wxString &cmdName,
+void CommandBuilder::BuildCommand(AudacityProject *project,
+                                  const wxString &cmdName,
                                   const wxString &cmdParamsArg)
 {
    // Stage 1: create a Command object of the right type
 
-   auto scriptOutput = ScriptCommandRelay::GetResponseTarget();
+   mResponse = std::make_shared< ResponseTarget >();
    auto output
       = std::make_unique<CommandOutputTargets>(std::make_unique<NullProgressTarget>(),
-                                scriptOutput,
-                                scriptOutput);
+                                mResponse,
+                                mResponse);
 
 #ifdef OLD_BATCH_SYSTEM
    OldStyleCommandType *factory = CommandDirectory::Get()->LookUp(cmdName);
@@ -98,7 +103,7 @@ void CommandBuilder::BuildCommand(const wxString &cmdName,
 #endif
       OldStyleCommandType *type = CommandDirectory::Get()->LookUp(wxT("BatchCommand"));
       wxASSERT(type != NULL);
-      mCommand = type->Create(nullptr);
+      mCommand = type->Create(project, nullptr);
       mCommand->SetParameter(wxT("CommandName"), cmdName);
       mCommand->SetParameter(wxT("ParamString"), cmdParamsArg);
       auto aCommand = std::make_shared<ApplyAndSendResponse>(mCommand, output);
@@ -139,12 +144,12 @@ void CommandBuilder::BuildCommand(const wxString &cmdName,
 
    wxString cmdParams(cmdParamsArg);
 
-   while (cmdParams != wxEmptyString)
+   while (!cmdParams.empty())
    {
       cmdParams.Trim(true);
       cmdParams.Trim(false);
       int splitAt = cmdParams.Find(wxT('='));
-      if (splitAt < 0 && cmdParams != wxEmptyString)
+      if (splitAt < 0 && !cmdParams.empty())
       {
          Failure(wxT("Parameter string is missing '='"));
          return;
@@ -155,11 +160,11 @@ void CommandBuilder::BuildCommand(const wxString &cmdName,
          Failure(wxT("Unrecognized parameter: '") + paramName + wxT("'"));
          return;
       }
-      // Handling of quoted strings is quite limitted.
+      // Handling of quoted strings is quite limited.
       // You start and end with a " or a '.
       // There is no escaping in the string.
       cmdParams = cmdParams.Mid(splitAt+1);
-      if( cmdParams.IsEmpty() )
+      if( cmdParams.empty() )
          splitAt =-1;
       else if( cmdParams[0] == '\"' ){
          cmdParams = cmdParams.Mid(1);
@@ -173,7 +178,7 @@ void CommandBuilder::BuildCommand(const wxString &cmdName,
          splitAt = cmdParams.Find(wxT(' '))+1;
       if (splitAt < 1)
       {
-         splitAt = cmdParams.Len();
+         splitAt = cmdParams.length();
       }
       cmdParams = cmdParams.Mid(splitAt);
    }
@@ -182,7 +187,8 @@ void CommandBuilder::BuildCommand(const wxString &cmdName,
 #endif
 }
 
-void CommandBuilder::BuildCommand(const wxString &cmdStringArg)
+void CommandBuilder::BuildCommand(
+   AudacityProject *project, const wxString &cmdStringArg)
 {
    wxString cmdString(cmdStringArg);
 
@@ -191,9 +197,7 @@ void CommandBuilder::BuildCommand(const wxString &cmdStringArg)
    cmdString.Trim(true); cmdString.Trim(false);
    int splitAt = cmdString.Find(wxT(':'));
    if (splitAt < 0 && cmdString.Find(wxT(' ')) >= 0) {
-      mError = wxT("Command is missing ':'");
-      ScriptCommandRelay::SendResponse(wxT("\n"));
-      mValid = false;
+      Failure(wxT("Syntax error!\nCommand is missing ':'"));
       return;
    }
 
@@ -205,5 +209,5 @@ void CommandBuilder::BuildCommand(const wxString &cmdStringArg)
    cmdName.Trim(true);
    cmdParams.Trim(false);
 
-   BuildCommand(cmdName, cmdParams);
+   BuildCommand(project, cmdName, cmdParams);
 }

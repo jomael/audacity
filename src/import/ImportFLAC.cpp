@@ -22,8 +22,9 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
-#include "ImportFLAC.h"
+#include "../Audacity.h" // for USE_* macros
+
+#include "../Experimental.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
@@ -37,39 +38,32 @@
 #include <wx/intl.h>    // needed for _("translated stings") even if we
                         // don't have libflac available
 
-#include "../AudacityException.h"
 #include "Import.h"
 #include "ImportPlugin.h"
 
 #include "../Tags.h"
+#include "../WaveClip.h"
+#include "../blockfile/ODDecodeBlockFile.h"
 #include "../prefs/QualityPrefs.h"
-
-#include "../Experimental.h"
+#include "../widgets/ProgressDialog.h"
 
 #define FLAC_HEADER "fLaC"
 
-#define DESC _("FLAC files")
+#define DESC XO("FLAC files")
 
-static const wxChar *exts[] =
-{
+static const auto exts = {
    wxT("flac"),
    wxT("flc")
 };
 
 #ifndef USE_LIBFLAC
 
-void GetFLACImportPlugin(ImportPluginList &importPluginList,
-                        UnusableImportPluginList &unusableImportPluginList)
-{
-   unusableImportPluginList.push_back(
-      make_movable<UnusableImportPlugin>
-         (DESC, wxArrayString(WXSIZEOF(exts), exts))
-   );
-}
+static Importer::RegisteredUnusableImportPlugin registered{
+      std::make_unique<UnusableImportPlugin>
+         (DESC, FileExtensions( exts.begin(), exts.end() ) )
+};
 
 #else /* USE_LIBFLAC */
-
-#include "../Internat.h"
 
 #include <wx/string.h>
 #include <wx/utils.h>
@@ -133,15 +127,16 @@ class FLACImportPlugin final : public ImportPlugin
 {
  public:
    FLACImportPlugin():
-      ImportPlugin(wxArrayString(WXSIZEOF(exts), exts))
+   ImportPlugin( FileExtensions( exts.begin(), exts.end() ) )
    {
    }
 
    ~FLACImportPlugin() { }
 
    wxString GetPluginStringID() override { return wxT("libflac"); }
-   wxString GetPluginFormatDescription() override;
-   std::unique_ptr<ImportFileHandle> Open(const wxString &Filename)  override;
+   TranslatableString GetPluginFormatDescription() override;
+   std::unique_ptr<ImportFileHandle> Open(
+      const FilePath &Filename, AudacityProject*)  override;
 };
 
 
@@ -149,21 +144,21 @@ class FLACImportFileHandle final : public ImportFileHandle
 {
    friend class MyFLACFile;
 public:
-   FLACImportFileHandle(const wxString & name);
+   FLACImportFileHandle(const FilePath & name);
    ~FLACImportFileHandle();
 
    bool Init();
 
-   wxString GetFileDescription() override;
+   TranslatableString GetFileDescription() override;
    ByteCount GetFileUncompressedBytes() override;
    ProgressResult Import(TrackFactory *trackFactory, TrackHolders &outTracks,
               Tags *tags) override;
 
    wxInt32 GetStreamCount() override { return 1; }
 
-   const wxArrayString &GetStreamInfo() override
+   const TranslatableStrings &GetStreamInfo() override
    {
-      static wxArrayString empty;
+      static TranslatableStrings empty;
       return empty;
    }
 
@@ -181,8 +176,8 @@ private:
    FLAC__uint64          mSamplesDone;
    bool                  mStreamInfoDone;
    ProgressResult        mUpdateResult;
-   TrackHolders          mChannels;
-   movable_ptr<ODDecodeFlacTask> mDecoderTask;
+   NewChannelGroup       mChannels;
+   std::unique_ptr<ODDecodeFlacTask> mDecoderTask;
 };
 
 
@@ -192,7 +187,7 @@ void MyFLACFile::metadata_callback(const FLAC__StreamMetadata *metadata)
    {
       case FLAC__METADATA_TYPE_VORBIS_COMMENT:
          for (FLAC__uint32 i = 0; i < metadata->data.vorbis_comment.num_comments; i++) {
-            mComments.Add(UTF8CTOWX((char *)metadata->data.vorbis_comment.comments[i].entry));
+            mComments.push_back(UTF8CTOWX((char *)metadata->data.vorbis_comment.comments[i].entry));
          }
       break;
 
@@ -289,21 +284,14 @@ FLAC__StreamDecoderWriteStatus MyFLACFile::write_callback(const FLAC__Frame *fra
    }, MakeSimpleGuard(FLAC__STREAM_DECODER_WRITE_STATUS_ABORT) );
 }
 
-
-void GetFLACImportPlugin(ImportPluginList &importPluginList,
-                         UnusableImportPluginList &WXUNUSED(unusableImportPluginList))
-{
-   importPluginList.push_back( make_movable<FLACImportPlugin>() );
-}
-
-
-wxString FLACImportPlugin::GetPluginFormatDescription()
+TranslatableString FLACImportPlugin::GetPluginFormatDescription()
 {
     return DESC;
 }
 
 
-std::unique_ptr<ImportFileHandle> FLACImportPlugin::Open(const wxString &filename)
+std::unique_ptr<ImportFileHandle> FLACImportPlugin::Open(
+   const FilePath &filename, AudacityProject*)
 {
    // First check if it really is a FLAC file
 
@@ -344,8 +332,11 @@ std::unique_ptr<ImportFileHandle> FLACImportPlugin::Open(const wxString &filenam
    return std::move(handle);
 }
 
+static Importer::RegisteredImportPlugin registered{ "FLAC",
+   std::make_unique< FLACImportPlugin >()
+};
 
-FLACImportFileHandle::FLACImportFileHandle(const wxString & name)
+FLACImportFileHandle::FLACImportFileHandle(const FilePath & name)
 :  ImportFileHandle(name),
    mSamplesDone(0),
    mStreamInfoDone(false),
@@ -358,7 +349,7 @@ FLACImportFileHandle::FLACImportFileHandle(const wxString & name)
 bool FLACImportFileHandle::Init()
 {
 #ifdef EXPERIMENTAL_OD_FLAC
-   mDecoderTask = make_movable<ODDecodeFlacTask>();
+   mDecoderTask = std::make_unique<ODDecodeFlacTask>();
 
    ODFlacDecoder* odDecoder = (ODFlacDecoder*)mDecoderTask->CreateFileDecoder(mFilename);
    if(!odDecoder || !odDecoder->ReadHeader())
@@ -429,7 +420,7 @@ bool FLACImportFileHandle::Init()
    return true;
 }
 
-wxString FLACImportFileHandle::GetFileDescription()
+TranslatableString FLACImportFileHandle::GetFileDescription()
 {
    return DESC;
 }
@@ -454,26 +445,11 @@ ProgressResult FLACImportFileHandle::Import(TrackFactory *trackFactory,
 
    mChannels.resize(mNumChannels);
 
-   auto iter = mChannels.begin();
-   for (size_t c = 0; c < mNumChannels; ++iter, ++c) {
-      *iter = trackFactory->NewWaveTrack(mFormat, mSampleRate);
-
-      if (mNumChannels == 2) {
-         switch (c) {
-         case 0:
-            iter->get()->SetChannel(Track::LeftChannel);
-            iter->get()->SetLinked(true);
-            break;
-         case 1:
-            iter->get()->SetChannel(Track::RightChannel);
-            break;
-         }
-      }
-      else {
-         iter->get()->SetChannel(Track::MonoChannel);
-      }
+   {
+      auto iter = mChannels.begin();
+      for (size_t c = 0; c < mNumChannels; ++iter, ++c)
+         *iter = trackFactory->NewWaveTrack(mFormat, mSampleRate);
    }
-
 
 //Start OD
    bool useOD = false;
@@ -504,7 +480,14 @@ ProgressResult FLACImportFileHandle::Import(TrackFactory *trackFactory,
 
          auto iter = mChannels.begin();
          for (size_t c = 0; c < mNumChannels; ++c, ++iter)
-            iter->get()->AppendCoded(mFilename, i, blockLen, c, ODTask::eODFLAC);
+            iter->get()->RightmostOrNewClip()->AppendBlockFile(
+               [&]( wxFileNameWrapper filePath, size_t len ) {
+                  return make_blockfile<ODDecodeBlockFile>(
+                  std::move(filePath), wxFileNameWrapper{ mFilename },
+                  i, len, c, ODTask::eODFLAC);
+               },
+               blockLen
+            );
 
          mUpdateResult = mProgress->Update(
             i.as_long_long(),
@@ -517,12 +500,12 @@ ProgressResult FLACImportFileHandle::Import(TrackFactory *trackFactory,
       bool moreThanStereo = mNumChannels>2;
       for (const auto &channel : mChannels)
       {
-         mDecoderTask->AddWaveTrack(channel.get());
+         mDecoderTask->AddWaveTrack(channel);
          if(moreThanStereo)
          {
-            //if we have 3 more channels, they get imported on seperate tracks, so we add individual tasks for each.
+            //if we have 3 more channels, they get imported on separate tracks, so we add individual tasks for each.
             ODManager::Instance()->AddNewTask(std::move(mDecoderTask));
-            mDecoderTask = make_movable<ODDecodeFlacTask>(); //TODO: see if we need to use clone to keep the metadata.
+            mDecoderTask = std::make_unique<ODDecodeFlacTask>(); //TODO: see if we need to use clone to keep the metadata.
          }
       }
       //if we have mono or a linked track (stereo), we add ONE task for the one linked wave track
@@ -536,19 +519,20 @@ ProgressResult FLACImportFileHandle::Import(TrackFactory *trackFactory,
       return mUpdateResult;
    }
 
-   for (const auto &channel : mChannels) {
+   for (const auto &channel : mChannels)
       channel->Flush();
-   }
-   outTracks.swap(mChannels);
+
+   if (!mChannels.empty())
+      outTracks.push_back(std::move(mChannels));
 
    tags->Clear();
-   size_t cnt = mFile->mComments.GetCount();
+   size_t cnt = mFile->mComments.size();
    for (size_t c = 0; c < cnt; c++) {
       wxString name = mFile->mComments[c].BeforeFirst(wxT('='));
       wxString value = mFile->mComments[c].AfterFirst(wxT('='));
       if (name.Upper() == wxT("DATE") && !tags->HasTag(TAG_YEAR)) {
          long val;
-         if (value.Length() == 4 && value.ToLong(&val)) {
+         if (value.length() == 4 && value.ToLong(&val)) {
             name = TAG_YEAR;
          }
       }

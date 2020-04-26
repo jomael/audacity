@@ -13,38 +13,34 @@ Vaughan Johnson (Preview)
 #ifndef __AUDACITY_EFFECT_SCIENFILTER__
 #define __AUDACITY_EFFECT_SCIENFILTER__
 
-#include <wx/arrstr.h>
-#include <wx/bitmap.h>
-#include <wx/choice.h>
-#include <wx/event.h>
-#include <wx/panel.h>
-#include <wx/slider.h>
-#include <wx/stattext.h>
-#include <wx/string.h>
-#include <wx/window.h>
+#include <wx/setup.h> // for wxUSE_* macros
 
-#include "../widgets/Ruler.h"
 #include "Biquad.h"
 
 #include "Effect.h"
 
+class wxBitmap;
+class wxChoice;
+class wxSlider;
+class wxStaticText;
 class wxTextCtrl;
+class RulerPanel;
 class ShuttleGui;
-
-#define CLASSICFILTERS_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Classic Filters") }
 
 class EffectScienFilterPanel;
 
 class EffectScienFilter final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectScienFilter();
    virtual ~EffectScienFilter();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
    wxString ManualPage() override;
 
    // EffectDefinitionInterface implementation
@@ -73,12 +69,8 @@ private:
    // EffectScienFilter implementation
 
    bool TransferGraphLimitsFromWindow();
-   bool CalcFilter();
-   double ChebyPoly (int Order, double NormFreq);
+   void CalcFilter();
    float FilterMagnAtFreq(float Freq);
-
-   bool CalcFilterCoeffs (void);
-
    void EnableDisableRippleCtl (int FilterType);
 
    void OnSize( wxSizeEvent & evt );
@@ -102,7 +94,7 @@ private:
    int mFilterSubtype;	// lowpass, highpass
    int mOrder;
    int mOrderIndex;
-   ArrayOf<BiquadStruct> mpBiquad;
+   ArrayOf<Biquad> mpBiquad;
 
    double mdBMax;
    double mdBMin;
@@ -176,13 +168,5 @@ private:
 
    DECLARE_EVENT_TABLE()
 };
-
-#if wxUSE_ACCESSIBILITY
-
-// ScienceFilter and Equalisation effects both need SliderAx class.
-// For now it is declared and defined in Equalisation effect.
-// TODO: Move it to its own file.
-
-#endif // wxUSE_ACCESSIBILITY
 
 #endif

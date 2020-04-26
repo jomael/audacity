@@ -11,67 +11,122 @@
 #ifndef __AUDACITY_FILE_NAMES__
 #define __AUDACITY_FILE_NAMES__
 
-#include <wx/string.h>
 #include "Audacity.h"
+
+#include <wx/dir.h> // for wxDIR_FILES
+#include <wx/string.h> // function return value
+#include "audacity/Types.h"
+#include "MemoryX.h"
 
 class wxFileName;
 class wxFileNameWrapper;
-class wxArrayString;
 
-// Uh, this is really a namespace rather than a class,
-// since all the functions are static.
-class AUDACITY_DLL_API FileNames
+namespace FileNames
 {
-public:
+   // A description of a type of file
+   struct FileType {
+      FileType() = default;
+
+      FileType( TranslatableString d, FileExtensions e, bool a = false )
+         : description{ std::move( d ) }
+         , extensions( std::move( e ) )
+         , appendExtensions{ a }
+      {}
+
+      TranslatableString description;
+      FileExtensions extensions;
+      // Whether to extend the displayed description with mention of the
+      // extensions:
+      bool appendExtensions = false;
+   };
+
+   // Frequently used types
+   extern const FileType
+        AllFiles // *
+      , AudacityProjects // *.aup
+      , DynamicLibraries // depends on the operating system
+      , TextFiles // *.txt
+      , XMLFiles; // *.xml, *.XML
+   
+   using FileTypes = std::vector< FileType >;
+
+   // Convert fileTypes into a single string as expected by wxWidgets file
+   // selection dialog
+   wxString FormatWildcard( const FileTypes &fileTypes );
+
    // This exists to compensate for bugs in wxCopyFile:
-   static bool CopyFile(
-      const wxString& file1, const wxString& file2, bool overwrite = true);
+   bool CopyFile(
+      const FilePath& file1, const FilePath& file2, bool overwrite = true);
 
-   static wxString MkDir(const wxString &Str);
-   static wxString TempDir();
+   // wxWidgets doesn't have a function to do this:  make a hard file-system
+   // link if possible.  It might not be, as when the paths are on different
+   // storage devices.
+   bool HardLinkFile( const FilePath& file1, const FilePath& file2);
 
-   // originally an ExportMultiple method. Append suffix if newName appears in otherNames.
-   static void MakeNameUnique(wxArrayString &otherNames, wxFileName &newName);
+   wxString MkDir(const wxString &Str);
+   wxString TempDir();
 
-   static wxString LowerCaseAppNameInPath( const wxString & dirIn);
+   const FilePath &DefaultTempDir();
+   void SetDefaultTempDir( const FilePath &tempDir );
+   bool IsTempDirectoryNameOK( const FilePath & Name );
+
+   bool IsMidi(const FilePath &fName);
+
+   /** \brief A list of directories that should be searched for Audacity files
+    * (plug-ins, help files, etc.).
+    *
+    * On Unix this will include the directory Audacity was installed into,
+    * plus the current user's .audacity-data/Plug-Ins directory.  Additional
+    * directories can be specified using the AUDACITY_PATH environment
+    * variable.  On Windows or Mac OS, this will include the directory
+    * which contains the Audacity program. */
+   const FilePaths &AudacityPathList();
+   void SetAudacityPathList( FilePaths list );
+
+   // originally an ExportMultipleDialog method. Append suffix if newName appears in otherNames.
+   void MakeNameUnique(
+      FilePaths &otherNames, wxFileName &newName);
+
+   wxString LowerCaseAppNameInPath( const wxString & dirIn);
    /** \brief Audacity user data directory
     *
-    * Where audacity keeps it's settings and other user data squirreled away,
+    * Where audacity keeps its settings and other user data squirreled away,
     * by default ~/.audacity-data/ on Unix, Application Data/Audacity on
     * windows system */
-   static wxString DataDir();
-   static wxString ResourcesDir();
-   static wxString AutoSaveDir();
-   static wxString HtmlHelpDir();
-   static wxString HtmlHelpIndexFile(bool quick);
-   static wxString LegacyChainDir();
-   static wxString MacroDir();
-   static wxString NRPDir();
-   static wxString NRPFile();
-   static wxString PluginRegistry();
-   static wxString PluginSettings();
+   FilePath DataDir();
+   FilePath ResourcesDir();
+   FilePath AutoSaveDir();
+   FilePath HtmlHelpDir();
+   FilePath HtmlHelpIndexFile(bool quick);
+   FilePath LegacyChainDir();
+   FilePath MacroDir();
+   FilePath NRPDir();
+   FilePath NRPFile();
+   FilePath PluginRegistry();
+   FilePath PluginSettings();
 
-   static wxString BaseDir();
-   static wxString ModulesDir();
+   FilePath BaseDir();
+   FilePath ModulesDir();
 
    /** \brief The user plug-in directory (not a system one)
     *
     * This returns the string path to where the user may have put plug-ins
     * if they don't have system admin rights. Under default settings, it's
     * <DataDir>/Plug-Ins/ */
-   static wxString PlugInDir();
-   static wxString ThemeDir();
-   static wxString ThemeComponentsDir();
-   static wxString ThemeCachePng();
-   static wxString ThemeCacheAsCee();
-   static wxString ThemeComponent(const wxString &Str);
-   static wxString ThemeCacheHtm();
-   static wxString ThemeImageDefsAsCee();
+   FilePath PlugInDir();
+   FilePath ThemeDir();
+   FilePath ThemeComponentsDir();
+   FilePath ThemeCachePng();
+   FilePath ThemeCacheAsCee();
+   FilePath ThemeComponent(const wxString &Str);
+   FilePath ThemeCacheHtm();
+   FilePath ThemeImageDefsAsCee();
 
    // Obtain name of loaded module that contains address
-   static wxString PathFromAddr(void *addr);
+   FilePath PathFromAddr(void *addr);
 
-   static wxFileNameWrapper DefaultToDocumentsFolder
+   bool IsPathAvailable( const FilePath & Path);
+   wxFileNameWrapper DefaultToDocumentsFolder
       (const wxString &preference);
 
    // If not None, determines a preference key (for the default path string) to
@@ -83,13 +138,13 @@ public:
       Export
    };
 
-   static wxString FindDefaultPath(Operation op);
-   static void UpdateDefaultPath(Operation op, const wxString &path);
+   wxString FindDefaultPath(Operation op);
+   void UpdateDefaultPath(Operation op, const FilePath &path);
 
    // F is a function taking a wxString, returning wxString
    template<typename F>
-   static wxString WithDefaultPath
-   (Operation op, const wxString &defaultPath, F function)
+   wxString WithDefaultPath
+   (Operation op, const FilePath &defaultPath, F function)
    {
       auto path = defaultPath;
       if (path.empty())
@@ -99,21 +154,49 @@ public:
       return result;
    }
 
-   static wxString
+   wxString
    SelectFile(Operation op,   // op matters only when default_path is empty
-              const wxString& message,
-                const wxString& default_path,
-                const wxString& default_filename,
-                const wxString& default_extension,
-                const wxString& wildcard,
-                int flags,
-                wxWindow *parent);
+      const TranslatableString& message,
+      const FilePath& default_path,
+      const FilePath& default_filename,
+      const FileExtension& default_extension,
+      const FileTypes& fileTypes,
+      int flags,
+      wxWindow *parent);
 
-private:
-   // Private constructors: No one is ever going to instantiate it.
-   //
-   FileNames(){;};
-   ~FileNames(){;};
+   // Useful functions for working with search paths
+   void AddUniquePathToPathList(const FilePath &path,
+                                       FilePaths &pathList);
+   void AddMultiPathsToPathList(const wxString &multiPathString,
+                                       FilePaths &pathList);
+   void FindFilesInPathList(const wxString & pattern,
+                                   const FilePaths & pathList,
+                                   FilePaths &results,
+                                   int flags = wxDIR_FILES);
+
+   /** \brief Protect against Unicode to multi-byte conversion failures
+    * on Windows */
+#if defined(__WXMSW__)
+   char *VerifyFilename(const wxString &s, bool input = true);
+#endif
 };
+
+// Use this macro to wrap all filenames and pathnames that get
+// passed directly to a system call, like opening a file, creating
+// a directory, checking to see that a file exists, etc...
+#if defined(__WXMSW__)
+// Note, on Windows we don't define an OSFILENAME() to prevent accidental use.
+// See VerifyFilename() for an explanation.
+#define OSINPUT(X) FileNames::VerifyFilename(X, true)
+#define OSOUTPUT(X) FileNames::VerifyFilename(X, false)
+#elif defined(__WXMAC__)
+#define OSFILENAME(X) ((char *) (const char *)(X).fn_str())
+#define OSINPUT(X) OSFILENAME(X)
+#define OSOUTPUT(X) OSFILENAME(X)
+#else
+#define OSFILENAME(X) ((char *) (const char *)(X).mb_str())
+#define OSINPUT(X) OSFILENAME(X)
+#define OSOUTPUT(X) OSFILENAME(X)
+#endif
 
 #endif

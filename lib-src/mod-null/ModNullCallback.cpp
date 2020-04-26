@@ -31,7 +31,8 @@ click from the menu into the actaul function to be called.
 #include "ModuleManager.h"
 #include "ShuttleGui.h"
 #include "Project.h"
-#include "LoadModules.h"
+#include "commands/CommandManager.h"
+#include "CommonCommandFlags.h"
 
 #if defined(__WXMSW__)
 #include <wx/init.h>
@@ -112,7 +113,7 @@ void ModNullCallback::OnFuncSecond(const CommandContext &)
 }
 ModNullCallback * pModNullCallback=NULL;
 
-#define ModNullFN(X) ident, static_cast<CommandFunctorPointer>(&ModNullCallback:: X)
+#define ModNullFN(X) static_cast<CommandFunctorPointer>((&ModNullCallback:: X))
 
 extern "C" {
 
@@ -135,43 +136,41 @@ const wxChar * GetVersionString()
    return AUDACITY_VERSION_STRING;
 }
 
+namespace {
+void RegisterMenuItems()
+{
+   // Get here only after the module version check passes
+   using namespace MenuTable;
+   // We add two new commands into the Analyze menu.
+   static AttachedItem sAttachment{ wxT("Analyze"),
+      ( FinderScope( ident ), Section( wxT("NullModule"),
+         Command(
+            _T("A New Command"), // internal name
+            XO("1st Experimental Command..."), //displayed name
+            ModNullFN( OnFuncFirst ),
+            AudioIONotBusyFlag() ),
+         Command(
+            _T("Another New Command"),
+            XO("2nd Experimental Command"),
+            ModNullFN( OnFuncSecond ),
+            AudioIONotBusyFlag() )
+      ) )
+   };
+}
+}
+
 // This is the function that connects us to Audacity.
 extern int DLL_API ModuleDispatch(ModuleDispatchTypes type);
 int ModuleDispatch(ModuleDispatchTypes type)
 {
    switch (type)
    {
+   case ModuleInitialize:
+      RegisterMenuItems();
+      break;
    case AppInitialized:
       break;
    case AppQuiting:
-      break;
-   case ProjectInitialized:
-   case MenusRebuilt:
-      {
-         AudacityProject *p = GetActiveProject();
-         if( p== NULL )
-            return 0;
-
-         wxMenuBar * pBar = p->GetMenuBar();
-         wxMenu * pMenu = pBar->GetMenu( 8 );  // Menu 8 is the Analyze Menu.
-         CommandManager * c = p->GetCommandManager();
-
-         c->SetCurrentMenu( pMenu );
-         c->AddSeparator();
-         c->SetDefaultFlags(AudioIONotBusyFlag, AudioIONotBusyFlag);
-         // We add two new commands into the Analyze menu.
-         c->AddItem( 
-            _T("A New Command"), // internal name
-            _T("1st Experimental Command"), //displayed name
-            true, // has dialog
-            ModNullFN( OnFuncFirst ) );
-         c->AddItem( 
-            _T("Another New Command"), 
-            _T("2nd Experimental Command"),
-            false, // no dialog
-            ModNullFN( OnFuncSecond ) );
-         c->ClearCurrentMenu();
-   }
       break;
    default:
       break;

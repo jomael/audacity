@@ -17,7 +17,7 @@
  **********************************************************************/
 
 #include "MemoryX.h"
-#include <wx/app.h>
+#include <wx/app.h> // used in inline function template
 #include <exception>
 
 #include "Internat.h"
@@ -30,11 +30,6 @@ public:
    AudacityException() {}
    virtual ~AudacityException() = 0;
 
-   // This is intended as a "polymorphic move copy constructor"
-   // which leaves this "empty".
-   // We would not need this if we had std::exception_ptr
-   virtual std::unique_ptr< AudacityException > Move() = 0;
-
    // Action to do in the main thread at idle time of the event loop.
    virtual void DelayedHandlerAction() = 0;
 
@@ -46,10 +41,10 @@ protected:
    AudacityException &operator = ( const AudacityException & ) PROHIBITED;
 };
 
-// A subclass of AudacityException whose delayed handler action displays
-// a message box.  The message is specified by further subclasses.
-// Not more than one message box will be displayed for each pass through
-// the main event idle loop.
+/// \brief A subclass of AudacityException whose delayed handler action displays
+/// a message box.  The message is specified by further subclasses.
+/// Not more than one message box will be displayed for each pass through
+/// the main event idle loop.
 class MessageBoxException /* not final */ : public AudacityException
 {
    // Do not allow subclasses to change this behavior further, except
@@ -59,26 +54,26 @@ class MessageBoxException /* not final */ : public AudacityException
 
 protected:
    // If default-constructed with empty caption, it makes no message box.
-   explicit MessageBoxException( const wxString &caption = wxString{} );
+   explicit MessageBoxException( const TranslatableString &caption = {} );
    ~MessageBoxException() override;
 
    MessageBoxException( const MessageBoxException& );
    MessageBoxException &operator = ( MessageBoxException && );
 
-   // Format a default, internationalized error message for this exception.
-   virtual wxString ErrorMessage() const = 0;
+   // Format a default error message for this exception.
+   virtual TranslatableString ErrorMessage() const = 0;
 
 private:
-   wxString caption;
+   TranslatableString caption;
    mutable bool moved { false };
 };
 
-// MessageBoxException that shows a given, unvarying string.
+/// \brief A MessageBoxException that shows a given, unvarying string.
 class SimpleMessageBoxException /* not final */ : public MessageBoxException
 {
 public:
-   explicit SimpleMessageBoxException( const wxString &message_,
-      const wxString &caption = _("Message") )
+   explicit SimpleMessageBoxException( const TranslatableString &message_,
+      const TranslatableString &caption = XO("Message") )
       : MessageBoxException{ caption }
       , message{ message_ }
    {}
@@ -88,15 +83,15 @@ public:
    SimpleMessageBoxException &operator = (
       SimpleMessageBoxException && ) PROHIBITED;
 
-   std::unique_ptr< AudacityException > Move() override;
-
    // Format a default, internationalized error message for this exception.
-   virtual wxString ErrorMessage() const override;
+   virtual TranslatableString ErrorMessage() const override;
 
 private:
-   wxString message;
+   TranslatableString message;
 };
 
+
+/// \brief performs the delayed configured action, when invoked.
 struct DefaultDelayedHandlerAction
 {
    void operator () (AudacityException *pException) const
@@ -106,8 +101,8 @@ struct DefaultDelayedHandlerAction
    }
 };
 
-// Classes that can supply the second argument of GuardedCall:
-// Frequently useful converter of all exceptions to some failure constant
+/// \brief SimpleGuard classes add the second argument of GuardedCall:
+/// Frequently useful converter of all exceptions to some failure constant
 template <typename R> struct SimpleGuard
 {
    explicit SimpleGuard( R value ) : m_value{ value } {}
@@ -115,7 +110,7 @@ template <typename R> struct SimpleGuard
    const R m_value;
 };
 
-// Simple guard specialization that returns bool, and defines Default
+/// \brief SimpleGuard specialization that returns bool, and defines Default
 template<> struct SimpleGuard<bool>
 {
    explicit SimpleGuard( bool value ) : m_value{ value } {}
@@ -125,7 +120,7 @@ template<> struct SimpleGuard<bool>
    const bool m_value;
 };
 
-// Simple guard specialization that returns nothing, and defines Default
+/// \brief SimpleGuard specialization that returns nothing, and defines Default
 template<> struct SimpleGuard<void>
 {
    SimpleGuard() {}
@@ -139,16 +134,24 @@ SimpleGuard< R > MakeSimpleGuard( R value )
 
 inline SimpleGuard< void > MakeSimpleGuard() { return {}; }
 
-/**
- * Call the body function (usually a lambda) inside a try block.
- *
- * The handler intercepts exceptions, and is passed nullptr if the
- * exception is of a type not defined by Audacity.  It may return a value
- * for the guarded call or throw the same or another exception.
- * It executes in the same thread as the body.
- *
- * If the handler is passed non-null and does not throw, then delayedHandler
- * executes later in the main thread, in idle time of the event loop.
+/***
+  \brief GuardedCall performs a body action, and provided there is no 
+  exception a handler action on completion.  If there is an exception, 
+  it queues up the delayed handler action for execution later in 
+  the idle event loop
+
+  The template is rather configurable, and default behaviours can be 
+  overridden.  GuardedCall makes use of SimpleGuard for the handler action.
+
+  GuardedCall calls the body function (usually a lambda) inside a try block.
+ 
+  The handler intercepts exceptions, and is passed nullptr if the
+  exception is of a type not defined by Audacity.  It may return a value
+  for the guarded call or throw the same or another exception.
+  The handler executes in the same thread as the body.
+ 
+  If the handler is passed non-null and does not throw, then delayedHandler
+  executes later in the main thread, in idle time of the event loop.
  */
 template <
    typename R = void, // return type
@@ -170,11 +173,15 @@ R GuardedCall
    catch ( AudacityException &e ) {
 
       auto end = finally([&]{
+         // At this point, e is the "current" exception, but not "uncaught"
+         // unless it was rethrown by handler.  handler might also throw some
+         // other exception object.
          if (!std::uncaught_exception()) {
-            auto pException =
-               std::shared_ptr< AudacityException > { e.Move().release() };
+            auto pException = std::current_exception(); // This points to e
             wxTheApp->CallAfter( [=] { // capture pException by value
-               delayedHandler( pException.get() );
+               try { std::rethrow_exception(pException); }
+               catch( AudacityException &e )
+                  { delayedHandler( &e ); }
             } );
          }
       });

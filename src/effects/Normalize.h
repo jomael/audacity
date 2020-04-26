@@ -12,28 +12,28 @@
 #ifndef __AUDACITY_EFFECT_NORMALIZE__
 #define __AUDACITY_EFFECT_NORMALIZE__
 
-#include <wx/checkbox.h>
-#include <wx/event.h>
-#include <wx/stattext.h>
-#include <wx/string.h>
-#include <wx/textctrl.h>
+#include "../Experimental.h"
 
 #include "Effect.h"
+#include "Biquad.h"
 
+class wxCheckBox;
+class wxStaticText;
+class wxTextCtrl;
 class ShuttleGui;
-
-#define NORMALIZE_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Normalize") }
 
 class EffectNormalize final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectNormalize();
    virtual ~EffectNormalize();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
    wxString ManualPage() override;
 
    // EffectDefinitionInterface implementation
@@ -59,20 +59,19 @@ private:
    // EffectNormalize implementation
 
    bool ProcessOne(
-      WaveTrack * t, const wxString &msg, int curTrackNum, float offset);
-   bool AnalyseTrack(const WaveTrack * track, const wxString &msg,
-                     int curTrackNum,
-                     float &offset, float &min, float &max);
-   void AnalyzeData(float *buffer, size_t len);
-   bool AnalyseDC(const WaveTrack * track, const wxString &msg, int curTrackNum,
-                  float &offset);
+      WaveTrack * t, const TranslatableString &msg, double& progress, float offset);
+   bool AnalyseTrack(const WaveTrack * track, const TranslatableString &msg,
+                     double &progress, float &offset, float &extent);
+   bool AnalyseTrackData(const WaveTrack * track, const TranslatableString &msg, double &progress,
+                     float &offset);
+   void AnalyseDataDC(float *buffer, size_t len);
    void ProcessData(float *buffer, size_t len, float offset);
 
    void OnUpdateUI(wxCommandEvent & evt);
    void UpdateUI();
 
 private:
-   double mLevel;
+   double mPeakLevel;
    bool   mGain;
    bool   mDC;
    bool   mStereoInd;
@@ -81,7 +80,6 @@ private:
    double mCurT1;
    float  mMult;
    double mSum;
-   sampleCount    mCount;
 
    wxCheckBox *mGainCheckBox;
    wxCheckBox *mDCCheckBox;
@@ -89,8 +87,8 @@ private:
    wxStaticText *mLeveldB;
    wxStaticText *mWarning;
    wxCheckBox *mStereoIndCheckBox;
-
    bool mCreating;
+
 
    DECLARE_EVENT_TABLE()
 };

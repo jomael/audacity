@@ -17,10 +17,18 @@ SetPreferenceCommand classes
 
 #include "../Audacity.h"
 #include "PreferenceCommands.h"
+
+#include "LoadCommands.h"
 #include "../Prefs.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../commands/CommandContext.h"
-#include "../Project.h" // for "OnReloadPreferences".
+#include "../prefs/PrefsDialog.h"
+
+const ComponentInterfaceSymbol GetPreferenceCommand::Symbol
+{ XO("Get Preference") };
+
+namespace{ BuiltinCommandsModule::Registration< GetPreferenceCommand > reg; }
 
 bool GetPreferenceCommand::DefineParams( ShuttleParams & S ){
    S.Define( mName, wxT("Name"),   wxT("") );
@@ -33,7 +41,7 @@ void GetPreferenceCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieTextBox(_("Name:"),mName);
+      S.TieTextBox(XO("Name:"),mName);
    }
    S.EndMultiColumn();
 }
@@ -49,10 +57,15 @@ bool GetPreferenceCommand::Apply(const CommandContext & context)
    return true;
 }
 
+const ComponentInterfaceSymbol SetPreferenceCommand::Symbol
+{ XO("Set Preference") };
+
+namespace{ BuiltinCommandsModule::Registration< SetPreferenceCommand > reg2; }
+
 bool SetPreferenceCommand::DefineParams( ShuttleParams & S ){
-   S.Define(                       mName,    wxT("Name"),    wxT("") );
-   S.Define(                       mValue,   wxT("Value"),   wxT("") );
-   S.OptionalN(bHasReload).Define( mbReload, wxT("Reload"),  false );
+   S.Define(    mName,   wxT("Name"),    wxT("") );
+   S.Define(   mValue,   wxT("Value"),   wxT("") );
+   S.Define( mbReload,   wxT("Reload"),  false );
    return true;
 }
 
@@ -62,9 +75,9 @@ void SetPreferenceCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieTextBox(_("Name:"),mName);
-      S.TieTextBox(_("Value:"),mValue);
-      S.TieCheckBox(_("Reload:"),mbReload);
+      S.TieTextBox(XO("Name:"),mName);
+      S.TieTextBox(XO("Value:"),mValue);
+      S.TieCheckBox(XO("Reload"),mbReload);
    }
    S.EndMultiColumn();
 }
@@ -73,7 +86,8 @@ bool SetPreferenceCommand::Apply(const CommandContext & context)
 {
    bool bOK = gPrefs->Write(mName, mValue) && gPrefs->Flush();
    if( bOK && mbReload ){
-      context.GetProject()->OnReloadPreferences( context );
+      auto &project = context.project;
+      DoReloadPreferences( project );
    }
    return bOK;
 }

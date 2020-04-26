@@ -167,18 +167,20 @@ different formats.
 
 #include "../Audacity.h"
 #include "NumericTextCtrl.h"
+
 #include "audacity/Types.h"
-#include "../Theme.h"
 #include "../AllThemeResources.h"
 #include "../AColor.h"
-#include "../Project.h"
-#include "../TranslatableStringArray.h"
+#include "../KeyboardCapture.h"
 
 #include <algorithm>
 #include <math.h>
 #include <limits>
 
+#include <wx/setup.h> // for wxUSE_* macros
+
 #include <wx/wx.h>
+#include <wx/dcbuffer.h>
 #include <wx/dcmemory.h>
 #include <wx/font.h>
 #include <wx/intl.h>
@@ -187,6 +189,90 @@ different formats.
 #include <wx/stattext.h>
 #include <wx/tooltip.h>
 #include <wx/toplevel.h>
+
+#if wxUSE_ACCESSIBILITY
+#include "WindowAccessible.h"
+
+class NumericTextCtrlAx final : public WindowAccessible
+{
+public:
+   NumericTextCtrlAx(NumericTextCtrl * ctrl);
+
+   virtual ~ NumericTextCtrlAx();
+
+   // Performs the default action. childId is 0 (the action for this object)
+   // or > 0 (the action for a child).
+   // Return wxACC_NOT_SUPPORTED if there is no default action for this
+   // window (e.g. an edit control).
+   wxAccStatus DoDefaultAction(int childId) override;
+
+   // Retrieves the address of an IDispatch interface for the specified child.
+   // All objects must support this property.
+   wxAccStatus GetChild(int childId, wxAccessible **child) override;
+
+   // Gets the number of children.
+   wxAccStatus GetChildCount(int *childCount) override;
+
+   // Gets the default action for this object (0) or > 0 (the action for a child).
+   // Return wxACC_OK even if there is no action. actionName is the action, or the empty
+   // string if there is no action.
+   // The retrieved string describes the action that is performed on an object,
+   // not what the object does as a result. For example, a toolbar button that prints
+   // a document has a default action of "Press" rather than "Prints the current document."
+   wxAccStatus GetDefaultAction(int childId, wxString *actionName) override;
+
+   // Returns the description for this object or a child.
+   wxAccStatus GetDescription(int childId, wxString *description) override;
+
+   // Gets the window with the keyboard focus.
+   // If childId is 0 and child is NULL, no object in
+   // this subhierarchy has the focus.
+   // If this object has the focus, child should be 'this'.
+   wxAccStatus GetFocus(int *childId, wxAccessible **child) override;
+
+   // Returns help text for this object or a child, similar to tooltip text.
+   wxAccStatus GetHelpText(int childId, wxString *helpText) override;
+
+   // Returns the keyboard shortcut for this object or child.
+   // Return e.g. ALT+K
+   wxAccStatus GetKeyboardShortcut(int childId, wxString *shortcut) override;
+
+   // Returns the rectangle for this object (id = 0) or a child element (id > 0).
+   // rect is in screen coordinates.
+   wxAccStatus GetLocation(wxRect & rect, int elementId) override;
+
+   // Gets the name of the specified object.
+   wxAccStatus GetName(int childId, wxString *name) override;
+
+   // Returns a role constant.
+   wxAccStatus GetRole(int childId, wxAccRole *role) override;
+
+   // Gets a variant representing the selected children
+   // of this object.
+   // Acceptable values:
+   // - a null variant (IsNull() returns TRUE)
+   // - a list variant (GetType() == wxT("list"))
+   // - an integer representing the selected child element,
+   //   or 0 if this object is selected (GetType() == wxT("long"))
+   // - a "void*" pointer to a wxAccessible child object
+   wxAccStatus GetSelections(wxVariant *selections) override;
+
+   // Returns a state constant.
+   wxAccStatus GetState(int childId, long *state) override;
+
+   // Returns a localized string representing the value for the object
+   // or child.
+   wxAccStatus GetValue(int childId, wxString *strValue) override;
+
+private:
+   NumericTextCtrl *mCtrl;
+   int mLastField;
+   int mLastDigit;
+   wxString mCachedName;
+   wxString mLastCtrlString;
+};
+
+#endif // wxUSE_ACCESSIBILITY
 
 //
 // ----------------------------------------------------------------------------
@@ -198,8 +284,8 @@ different formats.
  * to the user */
 struct BuiltinFormatString
 {
-   NumericFormatId name;
-   wxString formatStr;
+   NumericFormatSymbol name;
+   TranslatableString formatStr;
 
    friend inline bool operator ==
       (const BuiltinFormatString &a, const BuiltinFormatString &b)
@@ -472,8 +558,8 @@ static const BuiltinFormatString TimeConverterFormats_[] =  {
  *  needed to create that format output. This is used for the pop-up
  *  list of formats to choose from in the control. */
 static const BuiltinFormatString FrequencyConverterFormats_[] = {
-   /* i18n-hint: Name of display format that shows frequency in hertz */
    {
+      /* i18n-hint: Name of display format that shows frequency in hertz */
       { XO("Hz") },
          /* i18n-hint: Format string for displaying frequency in hertz. Change 
          * the decimal point for your locale. Don't change the numbers. */
@@ -559,19 +645,21 @@ static const BuiltinFormatString BandwidthConverterFormats_[] = {
 // NumericConverter Class
 // ----------------------------------------------------------------------------
 //
-NumericFormatId NumericConverter::DefaultSelectionFormat()
+NumericFormatSymbol NumericConverter::DefaultSelectionFormat()
 { return TimeConverterFormats_[4].name; }
-NumericFormatId NumericConverter::TimeAndSampleFormat()
+NumericFormatSymbol NumericConverter::TimeAndSampleFormat()
 { return TimeConverterFormats_[5].name; }
-NumericFormatId NumericConverter::SecondsFormat()
+NumericFormatSymbol NumericConverter::SecondsFormat()
 { return TimeConverterFormats_[0].name; }
-NumericFormatId NumericConverter::HundredthsFormat()
+NumericFormatSymbol NumericConverter::HoursMinsSecondsFormat()
+{ return TimeConverterFormats_[1].name; }
+NumericFormatSymbol NumericConverter::HundredthsFormat()
 { return TimeConverterFormats_[3].name; }
 
-NumericFormatId NumericConverter::HertzFormat()
+NumericFormatSymbol NumericConverter::HertzFormat()
 { return FrequencyConverterFormats_[0].name; }
 
-NumericFormatId NumericConverter::LookupFormat( Type type, const wxString& id)
+NumericFormatSymbol NumericConverter::LookupFormat( Type type, const wxString& id)
 {
    if (id.empty()) {
       if (type == TIME)
@@ -590,7 +678,7 @@ NumericFormatId NumericConverter::LookupFormat( Type type, const wxString& id)
 }
 
 NumericConverter::NumericConverter(Type type,
-                                   const NumericFormatId & formatName,
+                                   const NumericFormatSymbol & formatName,
                                    double value,
                                    double sampleRate)
    : mBuiltinFormatStrings( ChooseBuiltinFormatStrings( type ) )
@@ -607,11 +695,6 @@ NumericConverter::NumericConverter(Type type,
    if (type == NumericConverter::TIME )
       mDefaultNdx = 4; // Default to "hh:mm:ss + milliseconds".
 
-   mPrefix = wxT("");
-   mValueTemplate = wxT("");
-   mValueMask = wxT("");
-   mValueString = wxT("");
-
    mScalingFactor = 1.0f;
    mSampleRate = 1.0f;
    mNtscDrop = false;
@@ -625,8 +708,11 @@ NumericConverter::NumericConverter(Type type,
    SetValue(value); // mValue got overridden to -1 in ControlsToValue(), reassign
 }
 
-void NumericConverter::ParseFormatString( const wxString & format)
+void NumericConverter::ParseFormatString(
+   const TranslatableString & untranslatedFormat)
 {
+   auto format = untranslatedFormat.Translation();
+
    mPrefix = wxT("");
    mFields.clear();
    mDigits.clear();
@@ -641,12 +727,14 @@ void NumericConverter::ParseFormatString( const wxString & format)
    unsigned int i;
 
    mNtscDrop = false;
-   for(i=0; i<format.Length(); i++) {
+   for(i=0; i<format.length(); i++) {
       bool handleDelim = false;
       bool handleNum = false;
 
       if (format[i] == '|') {
-         wxString remainder = format.Right(format.Length() - i - 1);
+         wxString remainder = format.Right(format.length() - i - 1);
+         // For languages which use , as a separator.
+         remainder.Replace(wxT(","), wxT("."));
 
          if (remainder == wxT("#"))
             mScalingFactor = mSampleRate;
@@ -654,29 +742,29 @@ void NumericConverter::ParseFormatString( const wxString & format)
             mNtscDrop = true;
          }
          else
-            remainder.ToDouble(&mScalingFactor);
-         i = format.Length()-1; // force break out of loop
-         if (delimStr != wxT(""))
+            remainder.ToCDouble(&mScalingFactor);
+         i = format.length()-1; // force break out of loop
+         if (!delimStr.empty())
             handleDelim = true;
-         if (numStr != wxT(""))
+         if (!numStr.empty())
             handleNum = true;
       }
       else if ((format[i] >= '0' && format[i] <='9') ||
           format[i] == wxT('*') || format[i] == wxT('#')) {
          numStr += format[i];
-         if (delimStr != wxT(""))
+         if (!delimStr.empty())
             handleDelim = true;
       }
       else {
          delimStr += format[i];
-         if (numStr != wxT(""))
+         if (!numStr.empty())
             handleNum = true;
       }
 
-      if (i == format.Length() - 1) {
-         if (numStr != wxT(""))
+      if (i == format.length() - 1) {
+         if (!numStr.empty())
             handleNum = true;
-         if (delimStr != wxT(""))
+         if (!delimStr.empty())
             handleDelim = true;
       }
 
@@ -689,7 +777,7 @@ void NumericConverter::ParseFormatString( const wxString & format)
          else if (numStr.Right(1) != wxT("*")) {
             numStr.ToLong(&range);
          }
-         if (numStr.GetChar(0)=='0' && numStr.Length()>1)
+         if (numStr.GetChar(0)=='0' && numStr.length()>1)
             zeropad = true;
 
          // Hack: always zeropad
@@ -714,10 +802,17 @@ void NumericConverter::ParseFormatString( const wxString & format)
       if (handleDelim) {
          bool goToFrac = false;
 
-         if (!inFrac && delimStr[delimStr.Length()-1]=='.') {
+         if (!inFrac && delimStr[delimStr.length()-1]=='.') {
             goToFrac = true;
-            if (delimStr.Length() > 1)
+            if (delimStr.length() > 1)
                delimStr = delimStr.BeforeLast('.');
+         }
+         // Bug 2241 - Also handle , as decimal point
+         // for languages like French and German.
+         else if (!inFrac && delimStr[delimStr.length()-1]==',') {
+            goToFrac = true;
+            if (delimStr.length() > 1)
+               delimStr = delimStr.BeforeLast(',');
          }
 
          if (inFrac) {
@@ -754,9 +849,9 @@ void NumericConverter::ParseFormatString( const wxString & format)
    mValueTemplate = wxT("");
 
    mValueTemplate += mPrefix;
-   for(j=0; j<(int)mPrefix.Length(); j++)
+   for(j=0; j<(int)mPrefix.length(); j++)
       mValueMask += wxT(".");
-   pos += mPrefix.Length();
+   pos += mPrefix.length();
 
    for(i = 0; i < mFields.size(); i++) {
       mFields[i].pos = pos;
@@ -768,9 +863,9 @@ void NumericConverter::ParseFormatString( const wxString & format)
          pos++;
       }
 
-      pos += mFields[i].label.Length();
+      pos += mFields[i].label.length();
       mValueTemplate += mFields[i].label;
-      for(j=0; j<(int)mFields[i].label.Length(); j++)
+      for(j=0; j<(int)mFields[i].label.length(); j++)
          mValueMask += wxT(".");
    }
 }
@@ -885,7 +980,7 @@ void NumericConverter::ValueToControls(double rawValue, bool nearest /* = true *
 
       if (mFields[i].frac) {
          // JKC: This old code looks bogus to me.
-         // The rounding is not propogating to earlier fields in the frac case.
+         // The rounding is not propagating to earlier fields in the frac case.
          //value = (int)(t_frac * mFields[i].base + 0.5);  // +0.5 as rounding required
          // I did the rounding earlier.
          if (t_frac >= 0)
@@ -968,17 +1063,23 @@ void NumericConverter::ControlsToValue()
    mValue = std::max(mMinValue, std::min(mMaxValue, t));
 }
 
-void NumericConverter::SetFormatName(const NumericFormatId & formatName)
+bool NumericConverter::SetFormatName(const NumericFormatSymbol & formatName)
 {
-   SetFormatString(GetBuiltinFormat(formatName));
+   return
+      SetFormatString(GetBuiltinFormat(formatName));
 }
 
-void NumericConverter::SetFormatString(const wxString & formatString)
+bool NumericConverter::SetFormatString(const TranslatableString & formatString)
 {
-   mFormatString = formatString;
-   ParseFormatString(mFormatString);
-   ValueToControls();
-   ControlsToValue();
+   if (mFormatString != formatString) {
+      mFormatString = formatString;
+      ParseFormatString(mFormatString);
+      ValueToControls();
+      ControlsToValue();
+      return true;
+   }
+   else
+      return false;
 }
 
 void NumericConverter::SetSampleRate(double sampleRate)
@@ -1052,7 +1153,7 @@ int NumericConverter::GetNumBuiltins()
    return mNBuiltins;
 }
 
-NumericFormatId NumericConverter::GetBuiltinName(const int index)
+NumericFormatSymbol NumericConverter::GetBuiltinName(const int index)
 {
    if (index >= 0 && index < GetNumBuiltins())
       return mBuiltinFormatStrings[index].name;
@@ -1060,7 +1161,7 @@ NumericFormatId NumericConverter::GetBuiltinName(const int index)
    return {};
 }
 
-wxString NumericConverter::GetBuiltinFormat(const int index)
+TranslatableString NumericConverter::GetBuiltinFormat(const int index)
 {
    if (index >= 0 && index < GetNumBuiltins())
       return mBuiltinFormatStrings[index].formatStr;
@@ -1068,7 +1169,8 @@ wxString NumericConverter::GetBuiltinFormat(const int index)
    return {};
 }
 
-wxString NumericConverter::GetBuiltinFormat(const NumericFormatId &name)
+TranslatableString NumericConverter::GetBuiltinFormat(
+   const NumericFormatSymbol &name)
 {
    int ndx =
       std::find( mBuiltinFormatStrings, mBuiltinFormatStrings + mNBuiltins,
@@ -1209,7 +1311,7 @@ IMPLEMENT_CLASS(NumericTextCtrl, wxControl)
 
 NumericTextCtrl::NumericTextCtrl(wxWindow *parent, wxWindowID id,
                            NumericConverter::Type type,
-                           const NumericFormatId &formatName,
+                           const NumericFormatSymbol &formatName,
                            double timeValue,
                            double sampleRate,
                            const Options &options,
@@ -1226,16 +1328,23 @@ NumericTextCtrl::NumericTextCtrl(wxWindow *parent, wxWindowID id,
 {
    mAllowInvalidValue = false;
 
-   mDigitBoxW = 10;
-   mDigitBoxH = 16;
+   mDigitBoxW = 11;
+   mDigitBoxH = 19;
+
+   mBorderLeft = 1;
+   mBorderTop = 1;
+   mBorderRight = 1;
+   mBorderBottom = 1;
 
    mReadOnly = options.readOnly;
    mMenuEnabled = options.menuEnabled;
-   mButtonWidth = 9;
+   mButtonWidth = mMenuEnabled ? 9 : 0;
 
+   SetLayoutDirection(wxLayout_LeftToRight);
    Layout();
    Fit();
    ValueToControls();
+
    //PRL -- would this fix the following?
    //ValueToControls();
 
@@ -1246,7 +1355,7 @@ NumericTextCtrl::NumericTextCtrl(wxWindow *parent, wxWindowID id,
 
 #if wxUSE_ACCESSIBILITY
    SetLabel(wxT(""));
-   SetName(wxT(""));
+   SetName( {} );
    SetAccessible(safenew NumericTextCtrlAx(this));
 #endif
 
@@ -1258,10 +1367,16 @@ NumericTextCtrl::NumericTextCtrl(wxWindow *parent, wxWindowID id,
 
    if (options.hasValue)
       SetValue( options.value );
+
 }
 
 NumericTextCtrl::~NumericTextCtrl()
 {
+}
+
+void NumericTextCtrl::SetName( const TranslatableString &name )
+{
+   wxControl::SetName( name.Translation() );
 }
 
 // Set the focus to the first (left-most) non-zero digit
@@ -1282,19 +1397,24 @@ void NumericTextCtrl::UpdateAutoFocus()
    }
 }
 
-void NumericTextCtrl::SetFormatName(const NumericFormatId & formatName)
+bool NumericTextCtrl::SetFormatName(const NumericFormatSymbol & formatName)
 {
-   SetFormatString(GetBuiltinFormat(formatName));
+   return
+      SetFormatString(GetBuiltinFormat(formatName));
 }
 
-void NumericTextCtrl::SetFormatString(const wxString & formatString)
+bool NumericTextCtrl::SetFormatString(const TranslatableString & formatString)
 {
-   NumericConverter::SetFormatString(formatString);
-   Layout();
-   Fit();
-   ValueToControls();
-   ControlsToValue();
-   UpdateAutoFocus();
+   auto result =
+      NumericConverter::SetFormatString(formatString);
+   if (result) {
+      Layout();
+      Fit();
+      ValueToControls();
+      ControlsToValue();
+      UpdateAutoFocus();
+   }
+   return result;
 }
 
 void NumericTextCtrl::SetSampleRate(double sampleRate)
@@ -1311,6 +1431,14 @@ void NumericTextCtrl::SetValue(double newValue)
    NumericConverter::SetValue(newValue);
    ValueToControls();
    ControlsToValue();
+}
+
+void NumericTextCtrl::SetDigitSize(int width, int height)
+{
+   mDigitBoxW = width;
+   mDigitBoxH = height;
+   Layout();
+   Fit();
 }
 
 void NumericTextCtrl::SetReadOnly(bool readOnly)
@@ -1345,82 +1473,137 @@ void NumericTextCtrl::SetInvalidValue(double invalidValue)
       SetValue(invalidValue);
 }
 
-bool NumericTextCtrl::Layout()
+wxSize NumericTextCtrl::ComputeSizing(bool update, wxCoord boxW, wxCoord boxH)
 {
-   unsigned int i, j;
-   int x, pos;
+   // Get current box size
+   if (boxW == 0) {
+      boxW = mDigitBoxW;
+   }
 
-   wxMemoryDC memDC;
+   if (boxH == 0) {
+      boxH = mDigitBoxH;
+   }
+   boxH -= (mBorderTop + mBorderBottom);
 
-   // Placeholder bitmap so the memDC has something to reference
-   mBackgroundBitmap = std::make_unique<wxBitmap>(1, 1);
-   memDC.SelectObject(*mBackgroundBitmap);
+   // We can use the screen device context since we're not drawing to it
+   wxScreenDC dc;
 
-   mDigits.clear();
+   // First calculate a rough point size
+   wxFont pf(wxSize(boxW, boxH), wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+   int fontSize = pf.GetPointSize();
+   wxCoord strW;
+   wxCoord strH;
 
-   mBorderLeft = 1;
-   mBorderTop = 1;
-   mBorderRight = 1;
-   mBorderBottom = 1;
-
-   int fontSize = 4;
-   wxCoord strW, strH;
-   wxString exampleText = wxT("0");
-
-   // Keep making the font bigger until it's too big, then subtract one.
-   memDC.SetFont(wxFont(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
-   memDC.GetTextExtent(exampleText, &strW, &strH);
-   while (strW <= mDigitBoxW && strH <= mDigitBoxH) {
-      fontSize++;
-      memDC.SetFont(wxFont(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
-      memDC.GetTextExtent(exampleText, &strW, &strH);
+   // Now decrease it until we fit within our digit box
+   dc.SetFont(pf);
+   dc.GetTextExtent(wxT("0"), &strW, &strH);
+   while (strW > boxW || strH > boxH) {
+      dc.SetFont(wxFont(--fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+      dc.GetTextExtent(wxT("0"), &strW, &strH);
    }
    fontSize--;
 
-   mDigitFont = std::make_unique<wxFont>(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
-   memDC.SetFont(*mDigitFont);
-   memDC.GetTextExtent(exampleText, &strW, &strH);
-   mDigitW = strW;
-   mDigitH = strH;
+   // Create the digit font with the new point size
+   if (update) {
+      mDigitFont = std::make_unique<wxFont>(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+      dc.SetFont(*mDigitFont);
+
+      // Remember the actual digit width and height using the new font
+      dc.GetTextExtent(wxT("0"), &mDigitW, &mDigitH);
+   }
 
    // The label font should be a little smaller
-   fontSize--;
-   mLabelFont = std::make_unique<wxFont>(fontSize, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+   std::unique_ptr<wxFont> labelFont = std::make_unique<wxFont>(fontSize - 1, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
 
-   // Figure out the x-position of each field and label in the box
-   x = mBorderLeft;
-   pos = 0;
-
-   memDC.SetFont(*mLabelFont);
-   memDC.GetTextExtent(mPrefix, &strW, &strH);
-   x += strW;
-   pos += mPrefix.Length();
-
-   for(i = 0; i < mFields.size(); i++) {
-      mFields[i].fieldX = x;
-      for(j=0; j<(unsigned int)mFields[i].digits; j++) {
-         mDigits.push_back(DigitInfo(i, j, pos, wxRect(x, mBorderTop,
-                                                 mDigitBoxW, mDigitBoxH)));
-         x += mDigitBoxW;
-         pos++;
-      }
-
-      mFields[i].labelX = x;
-      memDC.GetTextExtent(mFields[i].label, &strW, &strH);
-      pos += mFields[i].label.Length();
-      x += strW;
-      mFields[i].fieldW = x;
+   // Use the label font for all remaining measurements since only non-digit text is left
+   dc.SetFont(*labelFont);
+ 
+   // Remember the pointer if updating
+   if (update) {
+      mLabelFont = std::move(labelFont);
    }
 
-   mWidth = x + mBorderRight;
-   mHeight = mDigitBoxH + mBorderTop + mBorderBottom;
+   // Get the width of the prefix, if any
+   dc.GetTextExtent(mPrefix, &strW, &strH);
+
+   // Bump x-position to the end of the prefix
+   int x = mBorderLeft + strW;
+
+   if (update) {
+      // Set the character position past the prefix
+      int pos = mPrefix.length();
+
+      // Reset digits array
+      mDigits.clear();
+
+      // Figure out the x-position of each field and label in the box
+      for (int i = 0, fcnt = mFields.size(); i < fcnt; ++i) {
+         // Get the size of the label
+         dc.GetTextExtent(mFields[i].label, &strW, &strH);
+
+         // Remember this field's x-position
+         mFields[i].fieldX = x;
+
+         // Remember metrics for each digit
+         for (int j = 0, dcnt = mFields[i].digits; j < dcnt; ++j) {
+            mDigits.push_back(DigitInfo(i, j, pos, wxRect(x, mBorderTop, boxW, boxH)));
+            x += boxW;
+            pos++;
+         }
+
+         // Remember the label's x-position
+         mFields[i].labelX = x;
+
+         // Bump to end of label
+         x += strW;
+
+         // Remember the label's width
+         mFields[i].fieldW = x;
+
+         // Bump character position to end of label
+         pos += mFields[i].label.length();
+      }
+   }
+   else {
+      // Determine the maximum x-position (length) of the remaining fields
+      for (int i = 0, fcnt = mFields.size(); i < fcnt; ++i) {
+         // Get the size of the label
+         dc.GetTextExtent(mFields[i].label, &strW, &strH);
+
+         // Just bump to next field
+         x += (boxW * mFields[i].digits) + strW;
+      }
+   }
+
+   // Calculate the maximum dimensions
+   wxSize dim(x + mBorderRight, boxH + mBorderTop + mBorderBottom);
+
+   // Save maximumFinally, calculate the minimum dimensions
+   if (update) {
+      mWidth = dim.x;
+      mHeight = dim.y;
+   }
+
+   return wxSize(dim.x + mButtonWidth, dim.y);
+}
+
+bool NumericTextCtrl::Layout()
+{
+   ComputeSizing();
+
+   wxMemoryDC memDC;
+   wxCoord strW, strH;
+   memDC.SetFont(*mLabelFont);
+   memDC.GetTextExtent(mPrefix, &strW, &strH);
+
+   int i;
 
    // Draw the background bitmap - it contains black boxes where
    // all of the digits go and all of the other text
 
    wxBrush Brush;
 
-   mBackgroundBitmap = std::make_unique<wxBitmap>(mWidth + mButtonWidth, mHeight);
+   mBackgroundBitmap = std::make_unique<wxBitmap>(mWidth + mButtonWidth, mHeight,24);
    memDC.SelectObject(*mBackgroundBitmap);
 
    theTheme.SetBrushColour( Brush, clrTimeHours );
@@ -1479,7 +1662,7 @@ void NumericTextCtrl::OnErase(wxEraseEvent & WXUNUSED(event))
 
 void NumericTextCtrl::OnPaint(wxPaintEvent & WXUNUSED(event))
 {
-   wxPaintDC dc(this);
+   wxBufferedPaintDC dc(this);
    bool focused = (FindFocus() == this);
 
    dc.DrawBitmap(*mBackgroundBitmap, 0, 0);
@@ -1623,16 +1806,13 @@ void NumericTextCtrl::OnMouse(wxMouseEvent &event)
 
 void NumericTextCtrl::OnFocus(wxFocusEvent &event)
 {
-   if (event.GetEventType() == wxEVT_KILL_FOCUS) {
-      AudacityProject::ReleaseKeyboard(this);
-   }
-   else {
-      AudacityProject::CaptureKeyboard(this);
-      if( mFocusedDigit <=0 )
-         UpdateAutoFocus();
-   }
+   KeyboardCapture::OnFocus( *this, event );
 
-   Refresh(false);
+   if (event.GetEventType() != wxEVT_KILL_FOCUS &&
+       mFocusedDigit <= 0 )
+      UpdateAutoFocus();
+
+   event.Skip( false ); // PRL: not sure why, but preserving old behavior
 }
 
 void NumericTextCtrl::OnCaptureKey(wxCommandEvent &event)
@@ -1660,7 +1840,7 @@ void NumericTextCtrl::OnCaptureKey(wxCommandEvent &event)
          return;
 
       default:
-         if (keyCode >= '0' && keyCode <= '9')
+         if (keyCode >= '0' && keyCode <= '9' && !kevent->HasAnyModifiers())
             return;
    }
 
@@ -1678,7 +1858,7 @@ void NumericTextCtrl::OnKeyUp(wxKeyEvent &event)
    if ((keyCode >= WXK_NUMPAD0) && (keyCode <= WXK_NUMPAD9))
       keyCode -= WXK_NUMPAD0 - '0';
 
-   if ((keyCode >= '0' && keyCode <= '9') ||
+   if ((keyCode >= '0' && keyCode <= '9' && !event.HasAnyModifiers()) ||
        (keyCode == WXK_DELETE) ||
        (keyCode == WXK_BACK) ||
        (keyCode == WXK_UP) ||
@@ -1709,7 +1889,7 @@ void NumericTextCtrl::OnKeyDown(wxKeyEvent &event)
    if ((keyCode >= WXK_NUMPAD0) && (keyCode <= WXK_NUMPAD9))
       keyCode -= WXK_NUMPAD0 - '0';
 
-   if (!mReadOnly && (keyCode >= '0' && keyCode <= '9')) {
+   if (!mReadOnly && (keyCode >= '0' && keyCode <= '9' && !event.HasAnyModifiers())) {
       int digitPosition = mDigits[mFocusedDigit].pos;
       if (mValueString[digitPosition] == wxChar('-')) {
          mValue = std::max(mMinValue, std::min(mMaxValue, 0.0));
@@ -1826,17 +2006,6 @@ void NumericTextCtrl::SetFieldFocus(int  digit)
    mFocusedDigit = digit;
    mLastField = mDigits[mFocusedDigit].field + 1;
 
-   // This looks strange (and it is), but it was the only way I could come
-   // up with that allowed Jaws, Window-Eyes, and NVDA to read the control
-   // somewhat the same.  See NumericTextCtrlAx below for even more odd looking
-   // hackery.
-   //
-   // If you change SetFieldFocus(), Updated(), or NumericTextCtrlAx, make sure
-   // you test with Jaws, Window-Eyes, and NVDA.
-   GetAccessible()->NotifyEvent(wxACC_EVENT_OBJECT_FOCUS,
-                                this,
-                                wxOBJID_CLIENT,
-                                0);
    GetAccessible()->NotifyEvent(wxACC_EVENT_OBJECT_FOCUS,
                                 this,
                                 wxOBJID_CLIENT,
@@ -1857,11 +2026,23 @@ void NumericTextCtrl::Updated(bool keyup /* = false */)
 
 #if wxUSE_ACCESSIBILITY
    if (!keyup) {
+      if (mDigits.size() == 0)
+      {
+         mFocusedDigit = 0;
+         return;
+      }
+
+      // The object_focus event is only needed by Window-Eyes
+      // and can be removed when we cease to support this screen reader.
+      GetAccessible()->NotifyEvent(wxACC_EVENT_OBJECT_FOCUS,
+         this,
+         wxOBJID_CLIENT,
+         mFocusedDigit + 1);
+
       GetAccessible()->NotifyEvent(wxACC_EVENT_OBJECT_NAMECHANGE,
-                                   this,
-                                   wxOBJID_CLIENT,
-                                   mFocusedDigit + 1);
-      SetFieldFocus(mFocusedDigit);
+         this,
+         wxOBJID_CLIENT,
+         mFocusedDigit + 1);
    }
 #endif
 }
@@ -1943,7 +2124,7 @@ wxAccStatus NumericTextCtrlAx::GetChildCount(int *childCount)
 // "Press" rather than "Prints the current document."
 wxAccStatus NumericTextCtrlAx::GetDefaultAction(int WXUNUSED(childId), wxString *actionName)
 {
-   actionName->Clear();
+   actionName->clear();
 
    return wxACC_OK;
 }
@@ -1951,7 +2132,7 @@ wxAccStatus NumericTextCtrlAx::GetDefaultAction(int WXUNUSED(childId), wxString 
 // Returns the description for this object or a child.
 wxAccStatus NumericTextCtrlAx::GetDescription(int WXUNUSED(childId), wxString *description)
 {
-   description->Clear();
+   description->clear();
 
    return wxACC_OK;
 }
@@ -1980,7 +2161,7 @@ wxAccStatus NumericTextCtrlAx::GetHelpText(int WXUNUSED(childId), wxString *help
 
    return wxACC_OK;
 #else
-   helpText->Clear();
+   helpText->clear();
 
    return wxACC_NOT_SUPPORTED;
 #endif
@@ -1990,7 +2171,7 @@ wxAccStatus NumericTextCtrlAx::GetHelpText(int WXUNUSED(childId), wxString *help
 // Return e.g. ALT+K
 wxAccStatus NumericTextCtrlAx::GetKeyboardShortcut(int WXUNUSED(childId), wxString *shortcut)
 {
-   shortcut->Clear();
+   shortcut->clear();
 
    return wxACC_OK;
 }
@@ -2023,7 +2204,7 @@ wxAccStatus NumericTextCtrlAx::GetName(int childId, wxString *name)
    // Slightly messy trick to save us some prefixing.
    std::vector<NumericField> & mFields = mCtrl->mFields;
 
-   wxString value = mCtrl->GetString();
+   wxString ctrlString = mCtrl->GetString();
    int field = mCtrl->GetFocusedField();
 
    // Return the entire string including the control label
@@ -2035,75 +2216,90 @@ wxAccStatus NumericTextCtrlAx::GetName(int childId, wxString *name)
          (childId < 1))
    {
       *name = mCtrl->GetName();
-      if (name->IsEmpty()) {
+      if (name->empty()) {
          *name = mCtrl->GetLabel();
       }
 
       *name += wxT(" ") +
                mCtrl->GetString();
    }
-   // The user has moved from one field of the time to another so
-   // report the value of the field and the field's label.
-   else if (mLastField != field) {
-      wxString label = mFields[field - 1].label;
-      int cnt = mFields.size();
-      wxString decimal = wxLocale::GetInfo(wxLOCALE_DECIMAL_POINT, wxLOCALE_CAT_NUMBER);
+   // This case is needed because of the behaviour of Narrator, which
+   // is different for the other Windows screen readers. After a focus event,
+   // Narrator causes getName() to be called more than once. However, the code in
+   // the following else statement assumes that it is executed only once
+   // when the focus has been moved to another digit. This else if statement
+   // ensures that this is the case, by using a cached value if nothing
+   // has changed.
+   else if (childId == mLastDigit && ctrlString.IsSameAs(mLastCtrlString)) {
+      *name = mCachedName;
+   }
+   else {
+      // The user has moved from one field of the time to another so
+      // report the value of the field and the field's label.
+      if (mLastField != field) {
+         wxString label = mFields[field - 1].label;
+         int cnt = mFields.size();
+         wxString decimal = wxLocale::GetInfo(wxLOCALE_DECIMAL_POINT, wxLOCALE_CAT_NUMBER);
 
-      // If the NEW field is the last field, then check it to see if
-      // it represents fractions of a second.
-      // PRL: click a digit of the control and use left and right arrow keys
-      // to exercise this code
-      const bool isTime = (mCtrl->mType == NumericTextCtrl::TIME);
-      if (field > 1 && field == cnt) {
-         if (mFields[field - 2].label == decimal) {
-            int digits = mFields[field - 1].digits;
-            if (digits == 2) {
-               if (isTime)
-                  label = _("centiseconds");
-               else {
-                  // other units
-                  // PRL:  does this create translation problems?
-                  label = _("hundredths of ");
-                  label += mFields[field - 1].label;
+         // If the NEW field is the last field, then check it to see if
+         // it represents fractions of a second.
+         // PRL: click a digit of the control and use left and right arrow keys
+         // to exercise this code
+         const bool isTime = (mCtrl->mType == NumericTextCtrl::TIME);
+         if (field > 1 && field == cnt) {
+            if (mFields[field - 2].label == decimal) {
+               int digits = mFields[field - 1].digits;
+               if (digits == 2) {
+                  if (isTime)
+                     label = _("centiseconds");
+                  else {
+                     // other units
+                     // PRL:  does this create translation problems?
+                     label = _("hundredths of ");
+                     label += mFields[field - 1].label;
+                  }
                }
-            }
-            else if (digits == 3) {
-               if (isTime)
-                  label = _("milliseconds");
-               else {
-                  // other units
-                  // PRL:  does this create translation problems?
-                  label = _("thousandths of ");
-                  label += mFields[field - 1].label;
+               else if (digits == 3) {
+                  if (isTime)
+                     label = _("milliseconds");
+                  else {
+                     // other units
+                     // PRL:  does this create translation problems?
+                     label = _("thousandths of ");
+                     label += mFields[field - 1].label;
+                  }
                }
             }
          }
+         // If the field following this one represents fractions of a
+         // second then use that label instead of the decimal point.
+         else if (label == decimal && field == cnt - 1) {
+            label = mFields[field].label;
+         }
+
+         *name = mFields[field - 1].str +
+                 wxT(" ") +
+                 label +
+                 wxT(", ") +     // comma inserts a slight pause
+                 mCtrl->GetString().at(mCtrl->mDigits[childId - 1].pos);
+         mLastField = field;
+         mLastDigit = childId;
       }
-      // If the field following this one represents fractions of a
-      // second then use that label instead of the decimal point.
-      else if (label == decimal && field == cnt - 1) {
-         label = mFields[field].label;
+      // The user has moved from one digit to another within a field so
+      // just report the digit under the cursor.
+      else if (mLastDigit != childId) {
+         *name = mCtrl->GetString().at(mCtrl->mDigits[childId - 1].pos);
+         mLastDigit = childId;
+      }
+      // The user has updated the value of a field, so report the field's
+      // value only.
+      else if (field > 0)
+      {
+         *name = mFields[field - 1].str;
       }
 
-      *name = mFields[field - 1].str +
-              wxT(" ") +
-              label +
-              wxT(", ") +     // comma inserts a slight pause
-              mCtrl->GetString().at(mCtrl->mDigits[childId - 1].pos);
-      mLastField = field;
-      mLastDigit = childId;
-   }
-   // The user has moved from one digit to another within a field so
-   // just report the digit under the cursor.
-   else if (mLastDigit != childId) {
-      *name = mCtrl->GetString().at(mCtrl->mDigits[childId - 1].pos);
-      mLastDigit = childId;
-   }
-   // The user has updated the value of a field, so report the field's
-   // value only.
-   else if (field > 0)
-   {
-      *name = mFields[field - 1].str;
+      mCachedName = *name;
+      mLastCtrlString = ctrlString;
    }
 
    return wxACC_OK;

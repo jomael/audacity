@@ -11,20 +11,16 @@ Paul Licameli split from TrackPanel.cpp
 #ifndef __AUDACITY_TRACK_PANEL_RESIZE_HANDLE__
 #define __AUDACITY_TRACK_PANEL_RESIZE_HANDLE__
 
-#include "MemoryX.h"
 #include "UIHandle.h"
 
 class Track;
-class TrackPanelCellIterator;
 
 class TrackPanelResizeHandle final : public UIHandle
 {
    TrackPanelResizeHandle(const TrackPanelResizeHandle&) = delete;
 
 public:
-   explicit TrackPanelResizeHandle
-      ( const std::shared_ptr<Track> &pTrack, int y,
-        const AudacityProject *pProject );
+   explicit TrackPanelResizeHandle( const std::shared_ptr<Track> &pTrack, int y );
 
    TrackPanelResizeHandle &operator=(const TrackPanelResizeHandle&) = default;
 
@@ -41,7 +37,7 @@ public:
       (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
 
    HitTestPreview Preview
-      (const TrackPanelMouseState &state,  const AudacityProject *pProject)
+      (const TrackPanelMouseState &state, AudacityProject *pProject)
       override;
 
    Result Release

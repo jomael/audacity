@@ -16,19 +16,23 @@ Provides thread-safe logging based on the wxWidgets log facility.
 
 #include "Audacity.h" // This should always be included first
 #include "AudacityLogger.h"
+
+#include "Experimental.h"
+
 #include "FileNames.h"
+#include "Internat.h"
 #include "ShuttleGui.h"
 
+#include <mutex>
 #include <wx/filedlg.h>
 #include <wx/log.h>
 #include <wx/frame.h>
 #include <wx/icon.h>
 #include <wx/settings.h>
+#include <wx/textctrl.h>
 
 #include "../images/AudacityLogoAlpha.xpm"
-#include "Experimental.h"
-#include "widgets/ErrorDialog.h"
-#include "Internat.h"
+#include "widgets/AudacityMessageBox.h"
 
 //
 // AudacityLogger class
@@ -48,6 +52,22 @@ enum
    LoggerID_Clear,
    LoggerID_Close
 };
+
+AudacityLogger *AudacityLogger::Get()
+{
+   static std::once_flag flag;
+   std::call_once( flag, []{
+      // wxWidgets will clean up the logger for the main thread, so we can say
+      // safenew.  See:
+      // http://docs.wxwidgets.org/3.0/classwx_log.html#a2525bf54fa3f31dc50e6e3cd8651e71d
+      std::unique_ptr < wxLog > // DELETE any previous logger
+         { wxLog::SetActiveTarget(safenew AudacityLogger) };
+   } );
+
+   // Use dynamic_cast so that we get a NULL ptr in case our logger
+   // is no longer the target.
+   return dynamic_cast<AudacityLogger *>(wxLog::GetActiveTarget());
+}
 
 AudacityLogger::AudacityLogger()
 :  wxEvtHandler(),
@@ -71,7 +91,7 @@ void AudacityLogger::DoLogText(const wxString & str)
       wxMutexGuiEnter();
    }
 
-   if (mBuffer.IsEmpty()) {
+   if (mBuffer.empty()) {
       wxString stamp;
 
       TimeStamp(&stamp);
@@ -136,21 +156,20 @@ void AudacityLogger::Show(bool show)
    // Log text
    ShuttleGui S(frame.get(), eIsCreating);
 
-   S.SetStyle(wxNO_BORDER | wxTAB_TRAVERSAL);
-   S.Prop(true).StartPanel();
+   S.Style(wxNO_BORDER | wxTAB_TRAVERSAL).Prop(true).StartPanel();
    {
       S.StartVerticalLay(true);
       {
-         S.SetStyle(wxTE_MULTILINE | wxHSCROLL | wxTE_READONLY);
-         mText = S.AddTextWindow(mBuffer);
+         mText = S.Style(wxTE_MULTILINE | wxHSCROLL | wxTE_READONLY | wxTE_RICH)
+            .AddTextWindow(mBuffer);
 
          S.AddSpace(0, 5);
          S.StartHorizontalLay(wxALIGN_CENTER, 0);
          {
             S.AddSpace(10, 0);
-            S.Id(LoggerID_Save).AddButton(_("&Save..."));
-            S.Id(LoggerID_Clear).AddButton(_("Cl&ear"));
-            S.Id(LoggerID_Close).AddButton(_("&Close"));
+            S.Id(LoggerID_Save).AddButton(XO("&Save..."));
+            S.Id(LoggerID_Clear).AddButton(XO("Cl&ear"));
+            S.Id(LoggerID_Close).AddButton(XO("&Close"));
             S.AddSpace(10, 0);
          }
          S.EndHorizontalLay();
@@ -232,22 +251,22 @@ void AudacityLogger::OnSave(wxCommandEvent & WXUNUSED(e))
    wxString fName = _("log.txt");
 
    fName = FileNames::SelectFile(FileNames::Operation::Export,
-                        _("Save log to:"),
-                        wxEmptyString,
-                        fName,
-                        wxT("txt"),
-                        wxT("*.txt"),
-                        wxFD_SAVE | wxFD_OVERWRITE_PROMPT | wxRESIZE_BORDER,
-                        mFrame.get());
+      XO("Save log to:"),
+      wxEmptyString,
+      fName,
+      wxT("txt"),
+      { FileNames::TextFiles },
+      wxFD_SAVE | wxFD_OVERWRITE_PROMPT | wxRESIZE_BORDER,
+      mFrame.get());
 
-   if (fName == wxEmptyString) {
+   if (fName.empty()) {
       return;
    }
 
    if (!mText->SaveFile(fName)) {
       AudacityMessageBox(
-         wxString::Format( _("Couldn't save log to file: %s"), fName ),
-         _("Warning"),
+         XO("Couldn't save log to file: %s").Format( fName ),
+         XO("Warning"),
          wxICON_EXCLAMATION,
          mFrame.get());
       return;

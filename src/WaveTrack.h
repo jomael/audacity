@@ -12,25 +12,29 @@
 #define __AUDACITY_WAVETRACK__
 
 #include "Track.h"
-#include "SampleFormat.h"
-#include "WaveClip.h"
-#include "Experimental.h"
-#include "widgets/ProgressDialog.h"
 
 #include <vector>
-#include <wx/gdicmn.h>
 #include <wx/longlong.h>
-#include <wx/thread.h>
 
 #include "WaveTrackLocation.h"
+
+class ProgressDialog;
 
 class SpectrogramSettings;
 class WaveformSettings;
 class TimeWarper;
 
-class CutlineHandle;
-class SampleHandle;
-class EnvelopeHandle;
+class Sequence;
+class WaveClip;
+
+// Array of pointers that assume ownership
+using WaveClipHolder = std::shared_ptr< WaveClip >;
+using WaveClipHolders = std::vector < WaveClipHolder >;
+using WaveClipConstHolders = std::vector < std::shared_ptr< const WaveClip > >;
+
+// Temporary arrays of mere pointers
+using WaveClipPointers = std::vector < WaveClip* >;
+using WaveClipConstPointers = std::vector < const WaveClip* >;
 
 //
 // Tolerance for merging wave tracks (in seconds)
@@ -53,52 +57,43 @@ struct Region
    }
 };
 
-class Regions : public std::vector < Region > {};
+using Regions = std::vector < Region >;
 
 class Envelope;
 
 class AUDACITY_DLL_API WaveTrack final : public PlayableTrack {
-
- private:
+public:
 
    //
    // Constructor / Destructor / Duplicator
    //
-   // Private since only factories are allowed to construct WaveTracks
-   //
 
    WaveTrack(const std::shared_ptr<DirManager> &projDirManager,
-             sampleFormat format = (sampleFormat)0,
-             double rate = 0);
+             sampleFormat format, double rate);
    WaveTrack(const WaveTrack &orig);
 
-   void Init(const WaveTrack &orig);
-
-public:
    // overwrite data excluding the sample sequence but including display
    // settings
    void Reinit(const WaveTrack &orig);
 
 private:
-   Track::Holder Duplicate() const override;
+   void Init(const WaveTrack &orig);
+
+   Track::Holder Clone() const override;
 
    friend class TrackFactory;
 
  public:
 
    typedef WaveTrackLocation Location;
-   using Holder = std::unique_ptr<WaveTrack>;
+   using Holder = std::shared_ptr<WaveTrack>;
 
    virtual ~WaveTrack();
 
-   std::vector<UIHandlePtr> DetailedHitTest
-      (const TrackPanelMouseState &state,
-       const AudacityProject *pProject, int currentTool, bool bMultiTool)
-      override;
-
    double GetOffset() const override;
    void SetOffset(double o) override;
-   virtual int GetChannel() const override;
+   virtual ChannelType GetChannelIgnoringPan() const;
+   ChannelType GetChannel() const override;
    virtual void SetPanFromChannelType() override;
 
    /** @brief Get the time at which the first clip in the track starts
@@ -118,8 +113,6 @@ private:
    // Identifying the type of track
    //
 
-   int GetKind() const override { return Wave; }
-
    //
    // WaveTrack parameters
    //
@@ -138,7 +131,10 @@ private:
    // Takes gain and pan into account
    float GetChannelGain(int channel) const;
 
-   void DoSetMinimized(bool isMinimized) override;
+   // Old gain is used in playback in linearly interpolating 
+   // the gain.
+   float GetOldChannelGain(int channel) const;
+   void SetOldChannelGain(int channel, float gain);
 
    int GetWaveColorIndex() const { return mWaveColorIndex; };
    void SetWaveColorIndex(int colorIndex);
@@ -161,6 +157,10 @@ private:
    //
 
    Track::Holder Cut(double t0, double t1) override;
+
+   // Make another track copying format, rate, color, etc. but containing no
+   // clips
+   Holder EmptyCopy() const;
 
    // If forClipboard is true,
    // and there is no clip at the end time of the selection, then the result
@@ -222,19 +222,6 @@ private:
    /// Flush must be called after last Append
    void Flush();
 
-   void AppendAlias(const wxString &fName, sampleCount start,
-                    size_t len, int channel,bool useOD);
-
-   ///for use with On-Demand decoding of compressed files.
-   ///decodeType should be an enum from ODDecodeTask that specifies what
-   ///Type of encoded file this is, such as eODFLAC
-   //vvv Why not use the ODTypeEnum typedef to enforce that for the parameter?
-   void AppendCoded(const wxString &fName, sampleCount start,
-                            size_t len, int channel, int decodeType);
-
-   ///gets an int with OD flags so that we can determine which ODTasks should be run on this track after save/open, etc.
-   unsigned int GetODFlags() const;
-
    ///Invalidates all clips' wavecaches.  Careful, This may not be threadsafe.
    void ClearWaveCaches();
 
@@ -243,7 +230,7 @@ private:
 
    ///
    /// MM: Now that each wave track can contain multiple clips, we don't
-   /// have a continous space of samples anymore, but we simulate it,
+   /// have a continuous space of samples anymore, but we simulate it,
    /// because there are alot of places (e.g. effects) using this interface.
    /// This interface makes much sense for modifying samples, but note that
    /// it is not time-accurate, because the "offset" is a double value and
@@ -252,8 +239,13 @@ private:
    /// guaranteed that the same samples are affected.
    ///
    bool Get(samplePtr buffer, sampleFormat format,
-                   sampleCount start, size_t len,
-                   fillFormat fill = fillZero, bool mayThrow = true, sampleCount * pNumCopied = nullptr) const;
+      sampleCount start, size_t len,
+      fillFormat fill = fillZero,
+      bool mayThrow = true,
+      // Report how many samples were copied from within clips, rather than
+      // filled according to fillFormat; but these were not necessarily one
+      // contiguous range.
+      sampleCount * pNumWithinClips = nullptr) const;
    void Set(samplePtr buffer, sampleFormat format,
                    sampleCount start, size_t len);
 
@@ -360,15 +352,15 @@ private:
    double LongSamplesToTime(sampleCount pos) const;
 
    // Get access to the (visible) clips in the tracks, in unspecified order
-   // (not necessarioy sequenced in time).
+   // (not necessarily sequenced in time).
    WaveClipHolders &GetClips() { return mClips; }
    const WaveClipConstHolders &GetClips() const
       { return reinterpret_cast< const WaveClipConstHolders& >( mClips ); }
 
-   // Get access to all clips (in some unspecified sequence),
+   // Get mutative access to all clips (in some unspecified sequence),
    // including those hidden in cutlines.
    class AllClipsIterator
-      : public std::iterator< std::forward_iterator_tag, WaveClip* >
+      : public ValueIterator< WaveClip * >
    {
    public:
       // Constructs an "end" iterator
@@ -388,42 +380,20 @@ private:
             return mStack.back().first->get();
       }
 
-      AllClipsIterator &operator ++ ()
-      {
-         // The unspecified sequence is a post-order, but there is no
-         // promise whether sister nodes are ordered in time.
-         if ( !mStack.empty() ) {
-            auto &pair =  mStack.back();
-            if ( ++pair.first == pair.second ) {
-               mStack.pop_back();
-            }
-            else
-               push( (*pair.first)->GetCutLines() );
-         }
-
-         return *this;
-      }
+      AllClipsIterator &operator ++ ();
 
       // Define == well enough to serve for loop termination test
-      friend bool operator ==
-         (const AllClipsIterator &a, const AllClipsIterator &b)
+      friend bool operator == (
+         const AllClipsIterator &a, const AllClipsIterator &b)
       { return a.mStack.empty() == b.mStack.empty(); }
 
-      friend bool operator !=
-         (const AllClipsIterator &a, const AllClipsIterator &b)
+      friend bool operator != (
+         const AllClipsIterator &a, const AllClipsIterator &b)
       { return !( a == b ); }
 
    private:
 
-      void push( WaveClipHolders &clips )
-      {
-         auto pClips = &clips;
-         while (!pClips->empty()) {
-            auto first = pClips->begin();
-            mStack.push_back( Pair( first, pClips->end() ) );
-            pClips = &(*first)->GetCutLines();
-         }
-      }
+      void push( WaveClipHolders &clips );
 
       using Iterator = WaveClipHolders::iterator;
       using Pair = std::pair< Iterator, Iterator >;
@@ -432,11 +402,49 @@ private:
       Stack mStack;
    };
 
+   // Get const access to all clips (in some unspecified sequence),
+   // including those hidden in cutlines.
+   class AllClipsConstIterator
+      : public ValueIterator< const WaveClip * >
+   {
+   public:
+      // Constructs an "end" iterator
+      AllClipsConstIterator () {}
+
+      // Construct a "begin" iterator
+      explicit AllClipsConstIterator( const WaveTrack &track )
+         : mIter{ const_cast< WaveTrack& >( track ) }
+      {}
+
+      const WaveClip *operator * () const
+      { return *mIter; }
+
+      AllClipsConstIterator &operator ++ ()
+      { ++mIter; return *this; }
+
+      // Define == well enough to serve for loop termination test
+      friend bool operator == (
+         const AllClipsConstIterator &a, const AllClipsConstIterator &b)
+      { return a.mIter == b.mIter; }
+
+      friend bool operator != (
+         const AllClipsConstIterator &a, const AllClipsConstIterator &b)
+      { return !( a == b ); }
+
+   private:
+      AllClipsIterator mIter;
+   };
+
    IteratorRange< AllClipsIterator > GetAllClips()
    {
       return { AllClipsIterator{ *this }, AllClipsIterator{ } };
    }
-
+   
+   IteratorRange< AllClipsConstIterator > GetAllClips() const
+   {
+      return { AllClipsConstIterator{ *this }, AllClipsConstIterator{ } };
+   }
+   
    // Create NEW clip and add it to this track. Returns a pointer
    // to the newly created clip.
    WaveClip* CreateClip();
@@ -518,80 +526,15 @@ private:
    // AutoSave related
    //
    // Retrieve the unique autosave ID
-   int GetAutoSaveIdent();
+   int GetAutoSaveIdent() const;
    // Set the unique autosave ID
    void SetAutoSaveIdent(int id);
-
-   //
-   // The following code will eventually become part of a GUIWaveTrack
-   // and will be taken out of the WaveTrack class:
-   //
-
-
-   typedef int WaveTrackDisplay;
-   enum WaveTrackDisplayValues : int {
-
-      // DO NOT REORDER OLD VALUES!  Replace obsoletes with placeholders.
-
-      Waveform = 0,
-      MinDisplay = Waveform,
-
-      obsoleteWaveformDBDisplay,
-
-      Spectrum,
-
-      obsolete1, // was SpectrumLogDisplay
-      obsolete2, // was SpectralSelectionDisplay
-      obsolete3, // was SpectralSelectionLogDisplay
-      obsolete4, // was PitchDisplay
-
-      // Add values here, and update MaxDisplay.
-
-      MaxDisplay = Spectrum,
-
-      NoDisplay,            // Preview track has no display
-   };
-
-   // Only two types of sample display for now, but
-   // others (eg sinc interpolation) may be added later.
-   enum SampleDisplay {
-      LinearInterpolate = 0,
-      StemPlot
-   };
-
-   // Various preset zooming levels.
-   enum ZoomPresets {
-      kZoomToFit = 0,
-      kZoomToSelection,
-      kZoomDefault,
-      kZoomMinutes,
-      kZoomSeconds,
-      kZoom5ths,
-      kZoom10ths,
-      kZoom20ths,
-      kZoom50ths,
-      kZoom100ths,
-      kZoom500ths,
-      kZoomMilliSeconds,
-      kZoomSamples,
-      kZoom4To1,
-      kMaxZoom,
-   };
-
-   // Handle remapping of enum values from 2.1.0 and earlier
-   static WaveTrackDisplay ConvertLegacyDisplayValue(int oldValue);
-
-   // Handle restriction of range of values of the enum from future versions
-   static WaveTrackDisplay ValidateWaveTrackDisplay(WaveTrackDisplay display);
 
    int GetLastScaleType() const { return mLastScaleType; }
    void SetLastScaleType() const;
 
    int GetLastdBRange() const { return mLastdBRange; }
    void SetLastdBRange() const;
-
-   WaveTrackDisplay GetDisplay() const { return mDisplay; }
-   void SetDisplay(WaveTrackDisplay display) { mDisplay = display; }
 
    void GetDisplayBounds(float *min, float *max) const;
    void SetDisplayBounds(float min, float max) const;
@@ -615,6 +558,7 @@ private:
    float         mGain;
    float         mPan;
    int           mWaveColorIndex;
+   float         mOldGain[2];
 
 
    //
@@ -626,7 +570,6 @@ private:
    mutable float         mSpectrumMin;
    mutable float         mSpectrumMax;
 
-   WaveTrackDisplay mDisplay;
    mutable int   mLastScaleType; // last scale type choice
    mutable int           mLastdBRange;
    mutable std::vector <Location> mDisplayLocationsCache;
@@ -635,7 +578,9 @@ private:
    // Protected methods
    //
 
- private:
+private:
+
+   TrackKind GetKind() const override { return TrackKind::Wave; }
 
    //
    // Private variables
@@ -648,14 +593,6 @@ private:
 
    std::unique_ptr<SpectrogramSettings> mpSpectrumSettings;
    std::unique_ptr<WaveformSettings> mpWaveformSettings;
-
-   std::weak_ptr<CutlineHandle> mCutlineHandle;
-   std::weak_ptr<SampleHandle> mSampleHandle;
-   std::weak_ptr<EnvelopeHandle> mEnvelopeHandle;
-
-protected:
-   std::shared_ptr<TrackControls> GetControls() override;
-   std::shared_ptr<TrackVRulerControls> GetVRulerControls() override;
 };
 
 // This is meant to be a short-lived object, during whose lifetime,
@@ -680,7 +617,7 @@ public:
    }
    ~WaveTrackCache();
 
-   const WaveTrack *GetTrack() const { return mPTrack.get(); }
+   const std::shared_ptr<const WaveTrack>& GetTrack() const { return mPTrack; }
    void SetTrack(const std::shared_ptr<const WaveTrack> &pTrack);
 
    // Uses fillZero always

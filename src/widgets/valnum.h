@@ -12,16 +12,17 @@
 #define _WIDGETS_VALNUM_H_
 
 #include "../MemoryX.h"
+#include <wx/setup.h> // for wxUSE_* macros
 #include <wx/defs.h>
 
 #if wxUSE_VALIDATORS
 
-#include <wx/textctrl.h>
-#include <wx/validate.h>
+#include <wx/textctrl.h> // complete type needed in template function
+#include <wx/validate.h> // to inherit
 
 #include <limits>
 
-#define wxTextEntry wxTextCtrl
+class TranslatableString;
 
 // Bit masks used for numeric validator styles.
 enum class NumValidatorStyle : int
@@ -117,7 +118,7 @@ private:
     // Do all checks to ensure this is a valid value.
     // Returns 'true' if the control has valid value.
     // Otherwise the cause is indicated in 'errMsg'.
-    virtual bool DoValidateNumber(wxString * errMsg) const = 0;
+    virtual bool DoValidateNumber(TranslatableString * errMsg) const = 0;
 
     // Event handlers.
     void OnChar(wxKeyEvent& event);
@@ -145,7 +146,7 @@ namespace Private
 // variable.
 //
 // The template argument B is the name of the base class which must derive from
-// wxNumValidatorBase and define LongestValueType type and {To,As}String()
+// NumValidatorBase and define LongestValueType type and {To,As}String()
 // methods i.e. basically be one of {Integer,Number}ValidatorBase classes.
 //
 // The template argument T is just the type handled by the validator that will
@@ -174,7 +175,7 @@ public:
     void SetMin(ValueType min)
     {
         this->DoSetMin(min);
-        BaseValidator::m_minSet = (min != std::numeric_limits<T>::min());
+        BaseValidator::m_minSet = (min != std::numeric_limits<T>::lowest());
     }
 
     void SetMax(ValueType max)
@@ -212,7 +213,7 @@ public:
                 return false;
 
             // If window is disabled, simply return
-            if ( !control->IsEnabled() )
+            if ( !this->m_validatorWindow->IsEnabled() )
                 return true;
 
             const wxString s(control->GetValue());
@@ -322,7 +323,7 @@ protected:
 
     // Implement NumValidatorBase pure virtual method.
     bool IsCharOk(const wxString& val, int pos, wxChar ch) const override;
-    bool DoValidateNumber(wxString * errMsg) const override;
+    bool DoValidateNumber(TranslatableString * errMsg) const override;
 
 private:
     // Minimal and maximal values accepted (inclusive).
@@ -422,7 +423,7 @@ protected:
 
     // Implement NumValidatorBase pure virtual method.
     bool IsCharOk(const wxString& val, int pos, wxChar ch) const override;
-    bool DoValidateNumber(wxString * errMsg) const override;
+    bool DoValidateNumber(TranslatableString * errMsg) const override;
 
     //Checks that it doesn't have too many decimal digits.
     bool ValidatePrecision(const wxString& s) const;
@@ -461,7 +462,7 @@ public:
     FloatingPointValidator(int precision,
                       ValueType *value = NULL,
                       NumValidatorStyle style = NumValidatorStyle::DEFAULT,
-                      ValueType min = -std::numeric_limits<ValueType>::max(),
+                      ValueType min = std::numeric_limits<ValueType>::lowest(),
                       ValueType max =  std::numeric_limits<ValueType>::max())
         : Base(value, style)
     {
@@ -482,7 +483,7 @@ private:
         // NB: Do not use min(), it's not the smallest representable value for
         //     the floating point types but rather the smallest representable
         //     positive value.
-        this->DoSetMin(-std::numeric_limits<ValueType>::max());
+        this->DoSetMin( std::numeric_limits<ValueType>::lowest());
         this->DoSetMax( std::numeric_limits<ValueType>::max());
     }
 };
@@ -505,6 +506,10 @@ MakeFloatingPointValidator(int precision, T *value, NumValidatorStyle style = Nu
 {
     return FloatingPointValidator<T>(precision, value, style);
 }
+
+// Sometimes useful for specifying max and min values for validators, when they
+// must have the same precision as the validated value
+double RoundValue(int precision, double value);
 
 #endif // wxUSE_VALIDATORS
 

@@ -27,8 +27,8 @@
 *//**********************************************************************/
 
 #include "../Audacity.h"
+#include "ProgressDialog.h"
 
-#include "../MemoryX.h"
 #include <algorithm>
 
 #include <wx/defs.h>
@@ -39,6 +39,7 @@
 #include <wx/dialog.h>
 #include <wx/event.h>
 #include <wx/evtloop.h>
+#include <wx/gauge.h>
 #include <wx/frame.h>
 #include <wx/intl.h>
 #include <wx/msgdlg.h>
@@ -47,11 +48,9 @@
 #include <wx/sound.h>
 #include <wx/stopwatch.h>
 #include <wx/window.h>
+#include <wx/stattext.h>
 
-#include "ProgressDialog.h"
-#include "ErrorDialog.h"
 #include "../Prefs.h"
-#include "../Internat.h"
 
 // This really should be a Preferences setting
 static const unsigned char beep[] =
@@ -999,19 +998,19 @@ ProgressDialog::ProgressDialog()
 {
 }
 
-ProgressDialog::ProgressDialog(const wxString & title,
-                               const wxString & message /* = wxEmptyString*/,
+ProgressDialog::ProgressDialog(const TranslatableString & title,
+                               const TranslatableString & message /* = {}*/,
                                int flags /* = pdlgDefaultFlags */,
-                               const wxString & sRemainingLabelText /* = wxEmptyString */)
+                               const TranslatableString & sRemainingLabelText /* = {} */)
 :  wxDialogWrapper()
 {
    Create(title, message, flags, sRemainingLabelText);
 }
 
-ProgressDialog::ProgressDialog(const wxString & title,
+ProgressDialog::ProgressDialog(const TranslatableString & title,
                                const MessageTable &columns,
                                int flags /* = pdlgDefaultFlags */,
-                               const wxString & sRemainingLabelText /* = wxEmptyString */)
+                               const TranslatableString & sRemainingLabelText /* = {} */)
 :  wxDialogWrapper()
 {
    Create(title, columns, flags, sRemainingLabelText);
@@ -1043,10 +1042,8 @@ ProgressDialog::~ProgressDialog()
 
    // Restore saved focus, but only if the window still exists.
    //
-   // It is possible that it was a deferred deletion and it was deleted since
-   // we captured the focused window.  So, we need to verify that the window
-   // still exists by searching all of the wxWidgets windows.  It's the only
-   // sure way.
+   // PRL:  I'm conservatively preserving the old existence test, but I think
+   // it's redundant now that we use wxWindowRef to avoid a dangling pointer
    if (mHadFocus && SearchForWindow(wxTopLevelWindows, mHadFocus)) {
       mHadFocus->SetFocus();
    }
@@ -1077,7 +1074,7 @@ void ProgressDialog::Reinit()
 {
    mLastValue = 0;
 
-   mStartTime = wxGetLocalTimeMillis().GetValue();
+   mStartTime = wxGetUTCTimeMillis().GetValue();
    mLastUpdate = mStartTime;
    mYieldTimer = mStartTime;
    mCancel = false;
@@ -1113,16 +1110,17 @@ void ProgressDialog::AddMessageAsColumn(wxBoxSizer * pSizer,
    // Join strings
    auto sText = column[0];
    std::for_each( column.begin() + 1, column.end(),
-      [&](const wxString &text) { sText += wxT("\n") + text; });
+      [&](const TranslatableString &text)
+         { sText.Join( text, wxT("\n") ); });
 
    // Create a statictext object and add to the sizer
    wxStaticText* oText = safenew wxStaticText(this,
                                               wxID_ANY,
-                                              sText,
+                                              sText.Translation(),
                                               wxDefaultPosition,
                                               wxDefaultSize,
                                               wxALIGN_LEFT);
-   oText->SetName(sText); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
+   oText->SetName(sText.Translation()); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
 
    // If this is the first column then set the mMessage pointer so non-TimerRecord usages
    // will still work correctly in SetMessage()
@@ -1133,10 +1131,10 @@ void ProgressDialog::AddMessageAsColumn(wxBoxSizer * pSizer,
    pSizer->Add(oText, 1, wxEXPAND | wxALL, 5);
 }
 
-bool ProgressDialog::Create(const wxString & title,
-                            const wxString & message /* = wxEmptyString */,
+bool ProgressDialog::Create(const TranslatableString & title,
+                            const TranslatableString & message /* = {} */,
                             int flags /* = pdlgDefaultFlags */,
-                            const wxString & sRemainingLabelText /* = wxEmptyString */)
+                            const TranslatableString & sRemainingLabelText /* = {} */)
 {
    MessageTable columns(1);
    columns.back().push_back(message);
@@ -1146,16 +1144,16 @@ bool ProgressDialog::Create(const wxString & title,
       // Record some values used in case of change of message
       // TODO: make the following work in case of message tables
       wxClientDC dc(this);
-      dc.GetMultiLineTextExtent(message, &mLastW, &mLastH);
+      dc.GetMultiLineTextExtent(message.Translation(), &mLastW, &mLastH);
    }
 
    return result;
 }
 
-bool ProgressDialog::Create(const wxString & title,
+bool ProgressDialog::Create(const TranslatableString & title,
                             const MessageTable & columns,
                             int flags /* = pdlgDefaultFlags */,
-                            const wxString & sRemainingLabelText /* = wxEmptyString */)
+                            const TranslatableString & sRemainingLabelText /* = {} */)
 {
    Init();
 
@@ -1178,7 +1176,7 @@ bool ProgressDialog::Create(const wxString & title,
       return false;
    }
 
-   SetName(GetTitle()); // This was added for NVDA screen reader and may now be redundant.
+   SetName(); // This was added for NVDA screen reader and may now be redundant.
    SetExtraStyle(GetExtraStyle() | wxWS_EX_TRANSIENT);   // Ancient code. Is it still required?
 
    {
@@ -1241,14 +1239,14 @@ bool ProgressDialog::Create(const wxString & title,
          }
 
          // Customised "Remaining" label text
-         wxString sRemainingText = sRemainingLabelText;
-         if (sRemainingText == wxEmptyString) {
-            sRemainingText = _("Remaining Time:");
+         auto sRemainingText = sRemainingLabelText;
+         if (sRemainingText.empty()) {
+            sRemainingText = XO("Remaining Time:");
          }
 
          window = safenew wxStaticText(this,
                                        wxID_ANY,
-                                       sRemainingText,
+                                       sRemainingText.Translation(),
                                        wxDefaultPosition,
                                        wxDefaultSize,
                                        wxALIGN_RIGHT);
@@ -1316,7 +1314,8 @@ bool ProgressDialog::Create(const wxString & title,
 //
 // Update the time and, optionally, the message
 //
-ProgressResult ProgressDialog::Update(int value, const wxString & message)
+ProgressResult ProgressDialog::Update(
+   int value, const TranslatableString & message)
 {
    if (mCancel)
    {
@@ -1328,7 +1327,7 @@ ProgressResult ProgressDialog::Update(int value, const wxString & message)
       return ProgressResult::Stopped;
    }
 
-   wxLongLong_t now = wxGetLocalTimeMillis().GetValue();
+   wxLongLong_t now = wxGetUTCTimeMillis().GetValue();
    wxLongLong_t elapsed = now - mStartTime;
 
    if (elapsed < 500)
@@ -1409,7 +1408,8 @@ ProgressResult ProgressDialog::Update(int value, const wxString & message)
 //
 // Update the time and, optionally, the message
 //
-ProgressResult ProgressDialog::Update(double current, const wxString & message)
+ProgressResult ProgressDialog::Update(
+   double current, const TranslatableString & message)
 {
    return Update((int)(current * 1000), message);
 }
@@ -1417,7 +1417,8 @@ ProgressResult ProgressDialog::Update(double current, const wxString & message)
 //
 // Update the time and, optionally, the message
 //
-ProgressResult ProgressDialog::Update(wxULongLong_t current, wxULongLong_t total, const wxString & message)
+ProgressResult ProgressDialog::Update(
+   wxULongLong_t current, wxULongLong_t total, const TranslatableString & message)
 {
    if (total != 0)
    {
@@ -1432,7 +1433,8 @@ ProgressResult ProgressDialog::Update(wxULongLong_t current, wxULongLong_t total
 //
 // Update the time and, optionally, the message
 //
-ProgressResult ProgressDialog::Update(wxLongLong current, wxLongLong total, const wxString & message)
+ProgressResult ProgressDialog::Update(
+   wxLongLong current, wxLongLong total, const TranslatableString & message)
 {
    if (total.GetValue() != 0)
    {
@@ -1447,7 +1449,8 @@ ProgressResult ProgressDialog::Update(wxLongLong current, wxLongLong total, cons
 //
 // Update the time and, optionally, the message
 //
-ProgressResult ProgressDialog::Update(wxLongLong_t current, wxLongLong_t total, const wxString & message)
+ProgressResult ProgressDialog::Update(
+   wxLongLong_t current, wxLongLong_t total, const TranslatableString & message)
 {
    if (total != 0)
    {
@@ -1462,7 +1465,8 @@ ProgressResult ProgressDialog::Update(wxLongLong_t current, wxLongLong_t total, 
 //
 // Update the time and, optionally, the message
 //
-ProgressResult ProgressDialog::Update(int current, int total, const wxString & message)
+ProgressResult ProgressDialog::Update(
+   int current, int total, const TranslatableString & message)
 {
    if (total != 0)
    {
@@ -1477,7 +1481,8 @@ ProgressResult ProgressDialog::Update(int current, int total, const wxString & m
 //
 // Update the time and, optionally, the message
 //
-ProgressResult ProgressDialog::Update(double current, double total, const wxString & message)
+ProgressResult ProgressDialog::Update(
+   double current, double total, const TranslatableString & message)
 {
    if (total != 0)
    {
@@ -1492,15 +1497,15 @@ ProgressResult ProgressDialog::Update(double current, double total, const wxStri
 //
 // Update the message text
 //
-void ProgressDialog::SetMessage(const wxString & message)
+void ProgressDialog::SetMessage(const TranslatableString & message)
 {
-   if (!message.IsEmpty())
+   if (!message.empty())
    {
-      mMessage->SetLabel(message);
+      mMessage->SetLabel(message.Translation());
 
       int w, h;
       wxClientDC dc(mMessage);
-      dc.GetMultiLineTextExtent(message, &w, &h);
+      dc.GetMultiLineTextExtent(message.Translation(), &w, &h);
 
       bool sizeUpdated = false;
       wxSize ds = GetClientSize();
@@ -1553,7 +1558,9 @@ bool ProgressDialog::SearchForWindow(const wxWindowList & list, const wxWindow *
 
 void ProgressDialog::OnCancel(wxCommandEvent & WXUNUSED(event))
 {
-   if (!ConfirmAction(_("Are you sure you wish to cancel?"), _("Confirm Cancel"), wxID_CANCEL)) {
+   if (!ConfirmAction(
+         XO("Are you sure you wish to cancel?"),
+         XO("Confirm Cancel"), wxID_CANCEL)) {
       return;
    }
    FindWindowById(wxID_CANCEL, this)->Disable();
@@ -1562,7 +1569,9 @@ void ProgressDialog::OnCancel(wxCommandEvent & WXUNUSED(event))
 
 void ProgressDialog::OnStop(wxCommandEvent & WXUNUSED(event))
 {
-   if (!ConfirmAction(_("Are you sure you wish to stop?"), _("Confirm Stop"), wxID_OK)) {
+   if (!ConfirmAction(
+         XO("Are you sure you wish to stop?"),
+         XO("Confirm Stop"), wxID_OK)) {
       return;
    }
    FindWindowById(wxID_OK, this)->Disable();
@@ -1572,7 +1581,8 @@ void ProgressDialog::OnStop(wxCommandEvent & WXUNUSED(event))
 
 void ProgressDialog::OnCloseWindow(wxCloseEvent & WXUNUSED(event))
 {
-   if (!ConfirmAction(_("Are you sure you wish to close?"), _("Confirm Close"))) {
+   if (!ConfirmAction(
+         XO("Are you sure you wish to close?"), XO("Confirm Close"))) {
       return;
    }
    mCancel = true;
@@ -1588,12 +1598,12 @@ void ProgressDialog::Beep() const
    gPrefs->Read(wxT("/GUI/BeepAfterDuration"), &after, 60);
    gPrefs->Read(wxT("/GUI/BeepFileName"), &name, wxEmptyString);
 
-   if (should && wxGetLocalTimeMillis().GetValue() - mStartTime > after * 1000)
+   if (should && wxGetUTCTimeMillis().GetValue() - mStartTime > after * 1000)
    {
       wxBusyCursor busy;
       wxSound s;
 
-      if (name.IsEmpty())
+      if (name.empty())
       {
          s.Create(sizeof(beep), beep);
       }
@@ -1611,8 +1621,8 @@ void ProgressDialog::Beep() const
 
 // Confirm action taken by user.
 // Returns TRUE if the user confirms Yes
-bool ProgressDialog::ConfirmAction(const wxString & sPrompt,
-                                   const wxString & sTitle,
+bool ProgressDialog::ConfirmAction(const TranslatableString & sPrompt,
+                                   const TranslatableString & sTitle,
                                    int iButtonID /* = -1 */) {
 
    // Check if confirmations are enabled?
@@ -1621,10 +1631,11 @@ bool ProgressDialog::ConfirmAction(const wxString & sPrompt,
       return true;
    }
 
-   AudacityMessageDialog dlgMessage(this,
+   AudacityMessageDialog dlgMessage(
+      this,
       sPrompt,
       sTitle,
-      wxYES_NO | wxICON_QUESTION | wxNO_DEFAULT | wxSTAY_ON_TOP);
+      wxYES_NO | wxICON_QUESTION | wxNO_DEFAULT | wxSTAY_ON_TOP );
    int iAction = dlgMessage.ShowModal();
 
    bool bReturn = (iAction == wxID_YES);
@@ -1637,10 +1648,10 @@ bool ProgressDialog::ConfirmAction(const wxString & sPrompt,
 }
 
 TimerProgressDialog::TimerProgressDialog(const wxLongLong_t duration,
-                                         const wxString & title,
+                                         const TranslatableString & title,
                                          const MessageTable & columns,
                                          int flags /* = pdlgDefaultFlags */,
-                                         const wxString & sRemainingLabelText /* = wxEmptyString */)
+                                         const TranslatableString & sRemainingLabelText /* = {} */)
 : ProgressDialog(title, columns, flags, sRemainingLabelText)
 {
    mDuration = duration;
@@ -1658,7 +1669,7 @@ ProgressResult TimerProgressDialog::UpdateProgress()
       return ProgressResult::Stopped;
    }
 
-   wxLongLong_t now = wxGetLocalTimeMillis().GetValue();
+   wxLongLong_t now = wxGetUTCTimeMillis().GetValue();
    wxLongLong_t elapsed = now - mStartTime;
 
    if (elapsed < 500)
@@ -1683,7 +1694,7 @@ ProgressResult TimerProgressDialog::UpdateProgress()
    // wxASSERT((nGaugeValue >= 0) && (nGaugeValue <= 1010));
    //
    // stf. Update was being called after wxMilliSleep(<ms>), which could be up to <ms>
-   // beyond the completion time. My gusess is that the microsleep in RunWaitDialog was originally 10 ms
+   // beyond the completion time. My guess is that the microsleep in RunWaitDialog was originally 10 ms
    // (same as other uses of Update) but was updated to kTimerInterval = 50 ms, thus triggering
    // the Assert (Bug 1367). By calling Update() before sleeping then I think nGaugeValue <= 1000 should work.
    wxASSERT((nGaugeValue >= 0) && (nGaugeValue <= 1000));
@@ -1698,14 +1709,20 @@ ProgressResult TimerProgressDialog::UpdateProgress()
    // Only update if a full second has passed.
    if (now - mLastUpdate > 1000)
    {
+      // Bug 1952:
+      // wxTimeSpan will assert on ridiculously large values.
+      // We silently wrap the displayed range at one day.
+      // You'll only see the remaining hours, mins and secs.
+      // With a + sign, if the time was wrapped.
+      const wxLongLong_t wrapTime = 24 * 60 * 60 * 1000;
       if (m_bShowElapsedTime) {
-         wxTimeSpan tsElapsed(0, 0, 0, elapsed);
-         mElapsed->SetLabel(tsElapsed.Format(wxT("%H:%M:%S")));
+         wxTimeSpan tsElapsed(0, 0, 0, elapsed % wrapTime);
+         mElapsed->SetLabel(tsElapsed.Format(wxT("%H:%M:%S")) + ((elapsed >= wrapTime) ? " +":""));
          mElapsed->Update();
       }
 
-      wxTimeSpan tsRemains(0, 0, 0, remains);
-      mRemaining->SetLabel(tsRemains.Format(wxT("%H:%M:%S")));
+      wxTimeSpan tsRemains(0, 0, 0, remains % wrapTime);
+      mRemaining->SetLabel(tsRemains.Format(wxT("%H:%M:%S")) + ((remains >= wrapTime) ? " +":""));
       mRemaining->Update();
 
       mLastUpdate = now;
@@ -1722,7 +1739,21 @@ ProgressResult TimerProgressDialog::UpdateProgress()
    //      (and probably other things).  I do not yet know why this happens and
    //      I'm not too keen on having timer events processed here, but you do
    //      what you have to do.
-   wxEventLoopBase::GetActive()->YieldFor(wxEVT_CATEGORY_UI | wxEVT_CATEGORY_USER_INPUT | wxEVT_CATEGORY_TIMER);
+   // JKC: Added thread category, since blocking a thread message could cause things 
+   //      to gum up.  
+   //      See http://trac.wxwidgets.org/ticket/14027 for discussion of why
+   //      YieldFor is flaky.  
+   //      Conclusion...  use wxEVT_CATEGORY_ALL since with the list below, we 
+   //      are pretty much there already.
+   //           wxEVT_CATEGORY_UI |
+   //           wxEVT_CATEGORY_USER_INPUT |
+   //           wxEVT_CATEGORY_TIMER |
+   //           wxEVT_CATEGORY_THREAD
+
+   wxEventLoopBase::GetActive()->YieldFor(wxEVT_CATEGORY_ALL );
+   // JKC: Yielding twice, because e.g. a timer can build up a lot of events, and we 
+   //      really want to make sure they are worked through.
+   wxEventLoopBase::GetActive()->YieldFor(wxEVT_CATEGORY_ALL );
 
    // MY: Added this after the YieldFor to check we haven't changed the outcome based on buttons pressed...
    auto iReturn = ProgressResult::Success;

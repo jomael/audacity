@@ -1,47 +1,45 @@
-#directory cmake-proxies/expat
-set( TARGET expat )
-set( TARGET_SOURCE ${LIB_SRC_DIRECTORY}${TARGET} )
-project( ${TARGET} )
 
-set( SOURCES 
-#${LIB_SRC_DIRECTORY}expat/amiga/expat_68k.c
-#${LIB_SRC_DIRECTORY}expat/amiga/expat_68k_handler_stubs.c
-#${LIB_SRC_DIRECTORY}expat/amiga/expat_lib.c
-#${LIB_SRC_DIRECTORY}expat/amiga/expat_vectors.c
-#${LIB_SRC_DIRECTORY}expat/amiga/launch.c
-#${LIB_SRC_DIRECTORY}expat/examples/elements.c
-#${LIB_SRC_DIRECTORY}expat/examples/outline.c
+add_library( ${TARGET} STATIC )
 
-${LIB_SRC_DIRECTORY}expat/lib/xmlparse.c
-${LIB_SRC_DIRECTORY}expat/lib/xmlrole.c
-${LIB_SRC_DIRECTORY}expat/lib/xmltok.c
-${LIB_SRC_DIRECTORY}expat/lib/xmltok_impl.c
-${LIB_SRC_DIRECTORY}expat/lib/xmltok_ns.c
+def_vars()
 
-#${LIB_SRC_DIRECTORY}expat/tests/chardata.c
-#${LIB_SRC_DIRECTORY}expat/tests/minicheck.c
-#${LIB_SRC_DIRECTORY}expat/tests/runtests.c
-#${LIB_SRC_DIRECTORY}expat/tests/benchmark/benchmark.c
-#${LIB_SRC_DIRECTORY}expat/xmlwf/codepage.c
-#${LIB_SRC_DIRECTORY}expat/xmlwf/ct.c
-#${LIB_SRC_DIRECTORY}expat/xmlwf/readfilemap.c
-#${LIB_SRC_DIRECTORY}expat/xmlwf/unixfilemap.c
-#${LIB_SRC_DIRECTORY}expat/xmlwf/win32filemap.c
-#${LIB_SRC_DIRECTORY}expat/xmlwf/xmlfile.c
-#${LIB_SRC_DIRECTORY}expat/xmlwf/xmlmime.c
-#${LIB_SRC_DIRECTORY}expat/xmlwf/xmlwf.c
-
-#${LIB_SRC_DIRECTORY}expat/tests/runtestspp.cpp
-)
-# This defines the #define on both Windows and Linux.
-add_definitions( 
--D_LIB 
--DCOMPILED_FROM_DSP
-)
-add_library( ${TARGET} STATIC ${SOURCES})
-
-target_include_directories( ${TARGET} PRIVATE 
-${TARGET_SOURCE}/lib
+list( APPEND SOURCES
+   PRIVATE
+      ${TARGET_ROOT}/lib/xmlparse.c
+      ${TARGET_ROOT}/lib/xmlrole.c
+      ${TARGET_ROOT}/lib/xmltok.c
+      ${TARGET_ROOT}/lib/xmltok_impl.c
+      ${TARGET_ROOT}/lib/xmltok_ns.c
 )
 
-target_link_libraries( ${TARGET} )
+list( APPEND INCLUDES
+   PRIVATE
+      ${_PRVDIR}
+   PUBLIC
+      ${TARGET_ROOT}/lib
+)
+
+list( APPEND DEFINES
+   PRIVATE
+      HAVE_EXPAT_CONFIG_H
+   PUBLIC
+      XML_STATIC
+)
+
+if( WORDS_BIGENDIAN )
+   set( BYTEORDER 4321 )
+else( WORDS_BIGENDIAN )
+    set( BYTEORDER 1234 )
+endif()
+
+set( XML_DTD OFF )
+set( XML_NS OFF )
+
+configure_file( ${TARGET_ROOT}/expat_config.h.cmake private/expat_config.h )
+
+organize_source( "${TARGET_ROOT}" "" "${SOURCES}" )
+target_sources( ${TARGET} PRIVATE ${SOURCES} )
+target_compile_definitions( ${TARGET} PRIVATE ${DEFINES} )
+target_include_directories( ${TARGET} PRIVATE ${INCLUDES} )
+target_link_libraries( ${TARGET} PRIVATE ${LIBRARIES} )
+

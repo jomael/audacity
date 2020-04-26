@@ -7,42 +7,49 @@ bin_PROGRAMS = audacity$(EXEEXT)
 dist_doc_DATA = LICENSE.txt README.txt
 dist_pkgdata_DATA = presets/EQDefaultCurves.xml
 
+suillibdir = $(pkglibdir)
+suillib_DATA = $(shell [ -e lib-src/lv2/build ] && find lib-src/lv2/build -name \*.so)
+
 nobase_dist_pkgdata_DATA = \
+   include/audacity/ComponentInterface.h \
    include/audacity/ConfigInterface.h \
    include/audacity/EffectAutomationParameters.h \
    include/audacity/EffectInterface.h \
-   include/audacity/IdentInterface.h \
    include/audacity/ImporterInterface.h \
    include/audacity/ModuleInterface.h \
    include/audacity/PluginInterface.h \
    include/audacity/Types.h \
-   nyquist/dspprims.lsp \
-   nyquist/envelopes.lsp \
-   nyquist/equalizer.lsp \
-   nyquist/evalenv.lsp \
-   nyquist/fileio.lsp \
-   nyquist/follow.lsp \
-   nyquist/init.lsp \
-   nyquist/misc.lsp \
-   nyquist/nyinit.lsp \
-   nyquist/nyqmisc.lsp \
-   nyquist/nyquist-plot.txt \
-   nyquist/nyquist.lsp \
-   nyquist/printrec.lsp \
-   nyquist/profile.lsp \
-   nyquist/sal-parse.lsp \
-   nyquist/sal.lsp \
-   nyquist/seq.lsp \
-   nyquist/seqfnint.lsp \
-   nyquist/seqmidi.lsp \
-   nyquist/sndfnint.lsp \
-   nyquist/stk.lsp \
-   nyquist/system.lsp \
-   nyquist/test.lsp \
-   nyquist/upic.sal \
-   nyquist/velocity.lsp \
-   nyquist/xlinit.lsp \
-   nyquist/xm.lsp \
+	nyquist/aud-do-support.lsp \
+	nyquist/dspprims.lsp \
+	nyquist/envelopes.lsp \
+	nyquist/equalizer.lsp \
+	nyquist/evalenv.lsp \
+	nyquist/fileio.lsp \
+	nyquist/init.lsp \
+	nyquist/misc.lsp \
+	nyquist/nyinit-dbg.lsp \
+	nyquist/nyinit.lsp \
+	nyquist/nyqmisc.lsp \
+	nyquist/nyquist-plot.txt
+	nyquist/nyquist.lsp \
+	nyquist/printrec.lsp \
+	nyquist/profile.lsp \
+	nyquist/sal-parse.lsp \
+	nyquist/sal.lsp \
+	nyquist/seq.lsp \
+	nyquist/seqfnint.lsp \
+	nyquist/seqmidi.lsp \
+	nyquist/sliders.lsp \
+	nyquist/sndfnint.lsp \
+	nyquist/spec-plot.lsp \
+	nyquist/spectral-analysis.lsp \
+	nyquist/stk.lsp \
+	nyquist/system.lsp \
+	nyquist/test.lsp \
+	nyquist/upic.sal
+	nyquist/velocity.lsp \
+	nyquist/xlinit.lsp \
+	nyquist/xm.lsp \
    nyquist/rawwaves/mand1.raw \
    nyquist/rawwaves/mand2.raw \
    nyquist/rawwaves/mand3.raw \
@@ -64,24 +71,28 @@ nobase_dist_pkgdata_DATA = \
    plug-ins/crossfadeclips.ny \
    plug-ins/crossfadetracks.ny \
    plug-ins/delay.ny \
+   plug-ins/eq-xml-to-txt-converter.ny \
    plug-ins/equalabel.ny \
    plug-ins/highpass.ny \
    plug-ins/limiter.ny \
    plug-ins/lowpass.ny \
+   plug-ins/noisegate.ny \
    plug-ins/notch.ny \
+   plug-ins/nyquist-plug-in-installer.ny \
    plug-ins/pluck.ny \
    plug-ins/rhythmtrack.ny \
    plug-ins/rissetdrum.ny \
+   plug-ins/rms.ny \
    plug-ins/sample-data-export.ny \
    plug-ins/sample-data-import.ny \
    plug-ins/SilenceMarker.ny \
    plug-ins/SoundFinder.ny \
+   plug-ins/spectral-delete.ny \
    plug-ins/SpectralEditMulti.ny \
    plug-ins/SpectralEditParametricEQ.ny \
    plug-ins/SpectralEditShelves.ny \
    plug-ins/StudioFadeOut.ny \
    plug-ins/tremolo.ny \
-   plug-ins/vocalremover.ny \
    plug-ins/vocalrediso.ny \
    plug-ins/vocoder.ny \
    $(NULL)

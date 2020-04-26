@@ -9,11 +9,13 @@
 **********************************************************************/
 
 #include "audacity/ModuleInterface.h"
-#include "audacity/EffectInterface.h"
-#include "audacity/PluginInterface.h"
 
-#include "Effect.h"
+#include <functional>
+#include <memory>
+#include <unordered_map>
 #include "../MemoryX.h"
+
+class Effect;
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -27,42 +29,60 @@ public:
    BuiltinEffectsModule(ModuleManagerInterface *moduleManager, const wxString *path);
    virtual ~BuiltinEffectsModule();
 
-   // IdentInterface implementation
+   using Factory = std::function< std::unique_ptr<Effect> () >;
 
-   wxString GetPath() override;
-   IdentInterfaceSymbol GetSymbol() override;
-   IdentInterfaceSymbol GetVendor() override;
+   // Typically you make a static object of this type in the .cpp file that
+   // also implements the Effect subclass.
+   template< typename Subclass >
+   struct Registration final { Registration( bool excluded = false ) {
+      DoRegistration(
+         Subclass::Symbol, []{ return std::make_unique< Subclass >(); },
+         excluded );
+   } };
+
+   // ComponentInterface implementation
+
+   PluginPath GetPath() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   VendorSymbol GetVendor() override;
    wxString GetVersion() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // ModuleInterface implementation
 
    bool Initialize() override;
    void Terminate() override;
+   EffectFamilySymbol GetOptionalFamilySymbol() override;
 
-   wxArrayString FileExtensions() override { return {}; }
-   wxString InstallPath() override { return {}; }
+   const FileExtensions &GetFileExtensions() override;
+   FilePath InstallPath() override { return {}; }
 
    bool AutoRegisterPlugins(PluginManagerInterface & pm) override;
-   wxArrayString FindPluginPaths(PluginManagerInterface & pm) override;
+   PluginPaths FindPluginPaths(PluginManagerInterface & pm) override;
    unsigned DiscoverPluginsAtPath(
-      const wxString & path, wxString &errMsg,
+      const PluginPath & path, TranslatableString &errMsg,
       const RegistrationCallback &callback)
          override;
 
-   bool IsPluginValid(const wxString & path, bool bFast) override;
+   bool IsPluginValid(const PluginPath & path, bool bFast) override;
 
-   IdentInterface *CreateInstance(const wxString & path) override;
-   void DeleteInstance(IdentInterface *instance) override;
+   ComponentInterface *CreateInstance(const PluginPath & path) override;
+   void DeleteInstance(ComponentInterface *instance) override;
 
 private:
    // BuiltinEffectModule implementation
 
-   std::unique_ptr<Effect> Instantiate(const wxString & path);
+   std::unique_ptr<Effect> Instantiate(const PluginPath & path);
 
 private:
-   ModuleManagerInterface *mModMan;
-   wxString mPath;
+   static void DoRegistration(
+      const ComponentInterfaceSymbol &name, const Factory &factory,
+      bool excluded );
 
-   wxArrayString mNames;
+   ModuleManagerInterface *mModMan;
+   PluginPath mPath;
+
+   struct Entry;
+   using EffectHash = std::unordered_map< wxString, const Entry* > ;
+   EffectHash mEffects;
 };

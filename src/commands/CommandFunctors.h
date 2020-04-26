@@ -9,9 +9,6 @@
 #ifndef __AUDACITY_COMMAND_FUNCTORS__
 #define __AUDACITY_COMMAND_FUNCTORS__
 
-#include <wx/string.h>
-#include <wx/event.h>
-#include "../MemoryX.h"
 #include "Command.h"
 
 class AudacityProject;
@@ -31,9 +28,10 @@ class wxEvtHandler;
 // couldn't satisfy the requirement for both base classes at once.
 using CommandHandlerObject = wxEvtHandler;
 
-// First of two function pointers registered with each command: an extractor
+// First of two functions registered with each command: an extractor
 // of the handler object from the AudacityProject
-using CommandHandlerFinder = CommandHandlerObject &(*)(AudacityProject&);
+using CommandHandlerFinder =
+   std::function< CommandHandlerObject&(AudacityProject &) >;
 
 // Second of two function pointers registered with each command: a pointer
 // to a member function of the handler object

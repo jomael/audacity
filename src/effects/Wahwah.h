@@ -16,16 +16,11 @@
 #ifndef __AUDACITY_EFFECT_WAHWAH__
 #define __AUDACITY_EFFECT_WAHWAH__
 
-#include <wx/event.h>
-#include <wx/slider.h>
-#include <wx/string.h>
-#include <wx/textctrl.h>
-
 #include "Effect.h"
 
+class wxSlider;
+class wxTextCtrl;
 class ShuttleGui;
-
-#define WAHWAH_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Wahwah") }
 
 class EffectWahwahState
 {
@@ -44,13 +39,15 @@ public:
 class EffectWahwah final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectWahwah();
    virtual ~EffectWahwah();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
    wxString ManualPage() override;
 
    // EffectDefinitionInterface implementation

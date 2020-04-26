@@ -17,8 +17,10 @@
 #define __COMMANDBUILDER__
 
 #include "../MemoryX.h"
-#include <wx/string.h>
 
+class AudacityProject;
+class ResponseTarget;
+using ResponseTargetPointer = std::shared_ptr<ResponseTarget>;
 class OldStyleCommand;
 using OldStyleCommandPointer = std::shared_ptr<OldStyleCommand>;
 class wxString;
@@ -30,20 +32,22 @@ class CommandBuilder
 {
    private:
       bool mValid;
+      ResponseTargetPointer mResponse;
       OldStyleCommandPointer mCommand;
       wxString mError;
 
-      void Failure(const wxString &msg = wxEmptyString);
+      void Failure(const wxString &msg = {});
       void Success(const OldStyleCommandPointer &cmd);
-      void BuildCommand(const wxString &cmdName, const wxString &cmdParams);
-      void BuildCommand(const wxString &cmdString);
+      void BuildCommand( AudacityProject *project,
+         const wxString &cmdName, const wxString &cmdParams);
+      void BuildCommand( AudacityProject *project, const wxString &cmdString);
    public:
-      CommandBuilder(const wxString &cmdString);
-      CommandBuilder(const wxString &cmdName,
+      CommandBuilder(AudacityProject *project, const wxString &cmdString);
+      CommandBuilder(AudacityProject *project, const wxString &cmdName,
                      const wxString &cmdParams);
       ~CommandBuilder();
       bool WasValid();
       OldStyleCommandPointer GetCommand();
-      const wxString &GetErrorMessage();
+      wxString GetResponse();
 };
 #endif /* End of include guard: __COMMANDBUILDER__ */

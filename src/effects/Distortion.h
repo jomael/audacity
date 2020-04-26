@@ -11,19 +11,16 @@
 #ifndef __AUDACITY_EFFECT_DISTORTION__
 #define __AUDACITY_EFFECT_DISTORTION__
 
-#include <wx/arrstr.h>
-#include <wx/string.h>
-#include <wx/slider.h>
-#include <wx/textctrl.h>
-#include <wx/checkbox.h>
-
 #include <queue>
 
 #include "Effect.h"
 
+class wxSlider;
+class wxStaticText;
+class wxCheckBox;
+class wxTextCtrl;
 class ShuttleGui;
 
-#define DISTORTION_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Distortion") }
 #define STEPS 1024      // number of +ve or -ve steps in lookup tabe
 #define TABLESIZE 2049  // size of lookup table (steps * 2 + 1)
 
@@ -48,6 +45,8 @@ public:
 class EffectDistortion final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectDistortion();
    virtual ~EffectDistortion();
 
@@ -62,10 +61,10 @@ public:
       int    mRepeats;
    };
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
    wxString ManualPage() override;
 
    // EffectDefinitionInterface implementation
@@ -89,7 +88,7 @@ public:
    bool DefineParams( ShuttleParams & S ) override;
    bool GetAutomationParameters(CommandParameters & parms) override;
    bool SetAutomationParameters(CommandParameters & parms) override;
-   wxArrayString GetFactoryPresets() override;
+   RegistryPaths GetFactoryPresets() override;
    bool LoadFactoryPreset(int id) override;
 
    // Effect implementation
@@ -133,7 +132,7 @@ private:
    void OnRepeatsText(wxCommandEvent & evt);
    void OnRepeatsSlider(wxCommandEvent & evt);
    void UpdateUI();
-   void UpdateControl(control id, bool enable, wxString name);
+   void UpdateControl(control id, bool enable, TranslatableString name);
    void UpdateControlText(wxTextCtrl *textCtrl, wxString &string, bool enabled);
 
    void MakeTable();

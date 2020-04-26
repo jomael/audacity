@@ -20,6 +20,7 @@
 
 #include "../Audacity.h"
 #include "Amplify.h"
+#include "LoadEffects.h"
 
 #include <math.h>
 #include <float.h>
@@ -28,11 +29,13 @@
 #include <wx/checkbox.h>
 #include <wx/intl.h>
 #include <wx/sizer.h>
+#include <wx/slider.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 #include <wx/valtext.h>
 #include <wx/log.h>
 
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../WaveTrack.h"
 #include "../widgets/valnum.h"
@@ -56,6 +59,11 @@ Param( Clipping,  bool,    wxT("AllowClipping"),    false,    false,  true,    1
 // EffectAmplify
 //
 
+const ComponentInterfaceSymbol EffectAmplify::Symbol
+{ XO("Amplify") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectAmplify > reg; }
+
 BEGIN_EVENT_TABLE(EffectAmplify, wxEvtHandler)
    EVT_SLIDER(ID_Amp, EffectAmplify::OnAmpSlider)
    EVT_TEXT(ID_Amp, EffectAmplify::OnAmpText)
@@ -78,17 +86,17 @@ EffectAmplify::~EffectAmplify()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectAmplify::GetSymbol()
+ComponentInterfaceSymbol EffectAmplify::GetSymbol()
 {
-   return AMPLIFY_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectAmplify::GetDescription()
+TranslatableString EffectAmplify::GetDescription()
 {
    // Note: This is useful only after ratio has been set.
-   return _("Increases or decreases the volume of the audio you have selected");
+   return XO("Increases or decreases the volume of the audio you have selected");
 }
 
 wxString EffectAmplify::ManualPage()
@@ -180,11 +188,9 @@ bool EffectAmplify::Init()
 {
    mPeak = 0.0;
 
-   SelectedTrackListOfKindIterator iter(Track::Wave, inputTracks());
-
-   for (Track *t = iter.First(); t; t = iter.Next())
+   for (auto t : inputTracks()->Selected< const WaveTrack >())
    {
-      auto pair = ((WaveTrack *)t)->GetMinMax(mT0, mT1); // may throw
+      auto pair = t->GetMinMax(mT0, mT1); // may throw
       const float min = pair.first, max = pair.second;
       float newpeak = (fabs(min) > fabs(max) ? fabs(min) : fabs(max));
 
@@ -207,8 +213,12 @@ void EffectAmplify::Preview(bool dryOnly)
 
 void EffectAmplify::PopulateOrExchange(ShuttleGui & S)
 {
-   if (IsBatchProcessing())
+   enum{ precision = 3 }; // allow (a generous) 3 decimal  places for Amplification (dB)
+
+   bool batch = IsBatchProcessing();
+   if ( batch )
    {
+      mCanClip = true;
       mPeak = 1.0;
    }
    else 
@@ -228,53 +238,50 @@ void EffectAmplify::PopulateOrExchange(ShuttleGui & S)
 
    S.StartVerticalLay(0);
    {
-      int precission = 3; // allow (a generous) 3 decimal  places for Amplification (dB)
       // Amplitude
       S.StartMultiColumn(2, wxCENTER);
       {
-         FloatingPointValidator<double> vldAmp(precission, &mAmp, NumValidatorStyle::ONE_TRAILING_ZERO);
-         vldAmp.SetRange(MIN_Amp, MAX_Amp);
-         mAmpT = S.Id(ID_Amp).AddTextBox(_("Amplification (dB):"), wxT(""), 12);
-         mAmpT->SetValidator(vldAmp);
+         mAmpT = S.Id(ID_Amp)
+            .Validator<FloatingPointValidator<double>>(
+               precision, &mAmp, NumValidatorStyle::ONE_TRAILING_ZERO, MIN_Amp, MAX_Amp
+            )
+            .AddTextBox(XO("&Amplification (dB):"), wxT(""), 12);
       }
       S.EndMultiColumn();
 
       // Amplitude
       S.StartHorizontalLay(wxEXPAND);
       {
-         S.SetStyle(wxSL_HORIZONTAL);
-         mAmpS = S.Id(ID_Amp).AddSlider( {}, 0, MAX_Amp * SCL_Amp, MIN_Amp * SCL_Amp);
-         mAmpS->SetName(_("Amplification dB"));
+         mAmpS = S.Id(ID_Amp)
+            .Style(wxSL_HORIZONTAL)
+            .Name(XO("Amplification dB"))
+            .AddSlider( {}, 0, MAX_Amp * SCL_Amp, MIN_Amp * SCL_Amp);
       }
       S.EndHorizontalLay();
 
       // Peak
       S.StartMultiColumn(2, wxCENTER);
       {
-         // One extra decimal place so that rounding is visible to user (see: bug 958)
-         FloatingPointValidator<double> vldNewPeak(precission + 1, &mNewPeak, NumValidatorStyle::ONE_TRAILING_ZERO);
-         double minAmp = MIN_Amp + LINEAR_TO_DB(mPeak);
-         double maxAmp = MAX_Amp + LINEAR_TO_DB(mPeak);
-
-         // min and max need same precision as what we're validating (bug 963)
-         minAmp = Internat::CompatibleToDouble(Internat::ToString(minAmp, precission +1));
-         maxAmp = Internat::CompatibleToDouble(Internat::ToString(maxAmp, precission +1));
-
-         vldNewPeak.SetRange(minAmp, maxAmp);
-         mNewPeakT = S.Id(ID_Peak).AddTextBox(_("New Peak Amplitude (dB):"), wxT(""), 12);
-         mNewPeakT->SetValidator(vldNewPeak);
+         mNewPeakT = S.Id(ID_Peak)
+            .Validator<FloatingPointValidator<double>>(
+               // One extra decimal place so that rounding is visible to user
+               // (see: bug 958)
+               precision + 1,
+               &mNewPeak, NumValidatorStyle::ONE_TRAILING_ZERO,
+               // min and max need same precision as what we're validating (bug 963)
+               RoundValue( precision + 1, MIN_Amp + LINEAR_TO_DB(mPeak) ),
+               RoundValue( precision + 1, MAX_Amp + LINEAR_TO_DB(mPeak) )
+            )
+            .AddTextBox(XO("&New Peak Amplitude (dB):"), wxT(""), 12);
       }
       S.EndMultiColumn();
 
       // Clipping
       S.StartHorizontalLay(wxCENTER);
       {
-         mClip = S.Id(ID_Clip).AddCheckBox(_("Allow clipping"), wxT("false"));
-         if (IsBatchProcessing())
-         {
-            mClip->Enable(false);
-            mCanClip = true;
-         }
+
+         mClip = S.Id(ID_Clip).Disable( batch )
+            .AddCheckBox(XO("Allo&w clipping"), false);
       }
       S.EndHorizontalLay();
    }

@@ -13,30 +13,26 @@
 #ifndef __AUDACITY_EFFECT_CHANGESPEED__
 #define __AUDACITY_EFFECT_CHANGESPEED__
 
-#include <wx/choice.h>
-#include <wx/event.h>
-#include <wx/slider.h>
-#include <wx/string.h>
-#include <wx/textctrl.h>
-
-#include "../widgets/NumericTextCtrl.h"
-
 #include "Effect.h"
 
+class wxSlider;
+class wxChoice;
+class wxTextCtrl;
+class NumericTextCtrl;
 class ShuttleGui;
-
-#define CHANGESPEED_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Change Speed") }
 
 class EffectChangeSpeed final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectChangeSpeed();
    virtual ~EffectChangeSpeed();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
    wxString ManualPage() override;
 
    // EffectDefinitionInterface implementation
@@ -115,7 +111,7 @@ private:
    // private effect parameters
    int      mToVinyl;         // to standard vinyl speed (rpm)
    double   mToLength;        // target length of selection
-   NumericFormatId mFormat;          // time control format
+   NumericFormatSymbol mFormat;          // time control format
 
    DECLARE_EVENT_TABLE()
 };

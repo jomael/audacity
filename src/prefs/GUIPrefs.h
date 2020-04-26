@@ -15,43 +15,63 @@
 
 #include <wx/defs.h>
 
-#include <wx/arrstr.h>
-#include <wx/window.h>
-
 #include "PrefsPanel.h"
 
+class ChoiceSetting;
 class ShuttleGui;
+class wxArrayStringEx;
+
+#define GUI_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("GUI") }
 
 class GUIPrefs final : public PrefsPanel
 {
  public:
    GUIPrefs(wxWindow * parent, wxWindowID winid);
    ~GUIPrefs();
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
+
    bool Commit() override;
    wxString HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
-   static void GetRangeChoices(wxArrayString *pChoices, wxArrayString *pCodes);
+   static void GetRangeChoices(
+      TranslatableStrings *pChoices,
+      wxArrayStringEx *pCodes,
+      int *pDefaultRangeIndex = nullptr
+   );
+
+   // If no input language given, defaults first to choice in preferences, then
+   // to system language.
+   // Returns the language actually used which is not lang if lang cannot be found.
+   static wxString InitLang( wxString lang = {} );
+
+   // If no input language given, defaults to system language.
+   // Returns the language actually used which is not lang if lang cannot be found.
+   static wxString SetLang( const wxString & lang );
+
+   // Returns the last language code that was set
+   static wxString GetLang();
+   // Returns the last language code that was set
+   // Unlike GetLang, gives en rather than en_GB or en_US for result.
+   static wxString GetLangShort();
 
  private:
    void Populate();
 
-   wxArrayString mLangCodes;
-   wxArrayString mLangNames;
+   wxArrayStringEx mLangCodes;
+   TranslatableStrings mLangNames;
 
-   wxArrayString mHtmlHelpCodes;
-   wxArrayString mHtmlHelpChoices;
-
-   wxArrayString mThemeCodes;
-   wxArrayString mThemeChoices;
-
-   wxArrayString mRangeCodes;
-   wxArrayString mRangeChoices;
+   wxArrayStringEx mRangeCodes;
+   TranslatableStrings mRangeChoices;
+   int mDefaultRangeIndex;
 };
 
-class GUIPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
+int ShowClippingPrefsID();
+
+extern ChoiceSetting
+     GUIManualLocation
+   , GUITheme
+;
+
 #endif

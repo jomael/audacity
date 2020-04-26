@@ -14,10 +14,21 @@
 *//*******************************************************************/
 
 #include "../Audacity.h"
+#include "Fade.h"
 
 #include <wx/intl.h>
 
-#include "Fade.h"
+#include "LoadEffects.h"
+
+const ComponentInterfaceSymbol EffectFadeIn::Symbol
+{ XO("Fade In") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectFadeIn > reg; }
+
+const ComponentInterfaceSymbol EffectFadeOut::Symbol
+{ XO("Fade Out") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectFadeOut > reg2; }
 
 EffectFade::EffectFade(bool fadeIn)
 {
@@ -28,20 +39,20 @@ EffectFade::~EffectFade()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectFade::GetSymbol()
+ComponentInterfaceSymbol EffectFade::GetSymbol()
 {
    return mFadeIn
-      ? FADEIN_PLUGIN_SYMBOL
-      : FADEOUT_PLUGIN_SYMBOL;
+      ? EffectFadeIn::Symbol
+      : EffectFadeOut::Symbol;
 }
 
-wxString EffectFade::GetDescription()
+TranslatableString EffectFade::GetDescription()
 {
    return mFadeIn
-      ? _("Applies a linear fade-in to the selected audio")
-      : _("Applies a linear fade-out to the selected audio");
+      ? XO("Applies a linear fade-in to the selected audio")
+      : XO("Applies a linear fade-out to the selected audio");
 }
 
 // EffectDefinitionInterface implementation

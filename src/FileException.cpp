@@ -8,37 +8,31 @@
 
 #include "Audacity.h"
 #include "FileException.h"
-#include "Internat.h"
+
 #include "Prefs.h"
 
 FileException::~FileException()
 {
 }
 
-std::unique_ptr< AudacityException > FileException::Move()
+TranslatableString FileException::ErrorMessage() const
 {
-   return std::unique_ptr< AudacityException >
-      { safenew FileException{ std::move( *this ) } };
-}
-
-wxString FileException::ErrorMessage() const
-{
-   wxString format;
+   TranslatableString format;
    switch (cause) {
       case Cause::Open:
-         format = _("Audacity failed to open a file in %s.");
+         format = XO("Audacity failed to open a file in %s.");
          break;
       case Cause::Read:
-         format = _("Audacity failed to read from a file in %s.");
+         format = XO("Audacity failed to read from a file in %s.");
          break;
       case Cause::Write:
          format =
-_("Audacity failed to write to a file.\n"
+XO("Audacity failed to write to a file.\n"
   "Perhaps %s is not writable or the disk is full.");
          break;
       case Cause::Rename:
          format =
-_("Audacity successfully wrote a file in %s but failed to rename it as %s.");
+XO("Audacity successfully wrote a file in %s but failed to rename it as %s.");
       default:
          break;
    }
@@ -60,7 +54,6 @@ _("Audacity successfully wrote a file in %s but failed to rename it as %s.");
 
 #endif
 
-   return wxString::Format(
-      format, target, renameTarget.GetFullName() );
+   return format.Format( target, renameTarget.GetFullName() );
 }
 

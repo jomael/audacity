@@ -34,14 +34,14 @@ dnl Require autoconf >= 2.59
 AC_PREREQ([2.59])
 
 dnl Init autoconf
-AC_INIT([audacity], [2.3.0])
+AC_INIT([audacity], [2.4.0])
 dnl Check for existence of Audacity.h
 AC_CONFIG_SRCDIR([src/Audacity.h])
 AC_CONFIG_AUX_DIR([autotools])
 dnl we have some extra macros in m4/
 AC_CONFIG_MACRO_DIR([m4])
 
-AM_INIT_AUTOMAKE([1.9 dist-xz foreign no-dist-gzip subdir-objects -Wall -Wno-override tar-ustar])
+AM_INIT_AUTOMAKE([1.9 dist-xz foreign no-dist-gzip subdir-objects -Wall -Wno-override -Wno-portability tar-ustar])
 AM_MAINTAINER_MODE([disable])
 
 AM_GNU_GETTEXT_VERSION([0.18])
@@ -50,19 +50,15 @@ AM_GNU_GETTEXT([external])
 dnl -------------------------------------------------------
 dnl Checks for programs.
 dnl -------------------------------------------------------
-dnl save $CFLAGS etc. since AC_PROG_CC likes to insert "-g -O2"
-dnl if $CFLAGS is blank and it finds GCC
-cflags_save="$CFLAGS"
-cppflags_save="$CPPFLAGS"
-cxxflags_save="$CXXFLAGS"
+dnl Supply reasonable defaults
+CFLAGS=${CFLAGS:="-O2"}
+CXXFLAGS=${CXXFLAGS:="-O2"}
+
 AX_COMPILER_VENDOR
 AC_PROG_CC
 AC_LANG([C++])
 AC_PROG_CXX
 AC_PROG_CXXCPP
-CFLAGS="$cflags_save"
-CPPFLAGS="$cppflags_save"
-CXXFLAGS="$cxxflags_save"
 
 AM_PROG_AR
 
@@ -204,6 +200,14 @@ if test x$enable_universal_binary = xyes; then
    esac
 fi
 
+dnl Check if $CXX is clang by evaluating the version string because
+dnl $ax_cv_cxx_compiler_vendor seems not to work (it is either "gnu" or just empty).
+dnl If $CXX is clang (string is found), grep returns 0 and the if is executed.
+dnl Use /dev/null to suppress grep output to shell.
+if ($CXX --version | grep 'clang version' > /dev/null); then
+    LDFLAGS="${LDFLAGS} -latomic"
+fi
+
 if test x$enable_sse = xyes; then
 
    if test "${ax_cv_cxx_compiler_vendor}" = "gnu"; then
@@ -219,9 +223,9 @@ fi
 
 if test x"$debug_preference" = "xyes" ; then
    dnl we want debuging on
-   AC_MSG_NOTICE([Adding -g for debugging to CFLAGS and CXXFLAGS ...])
-   CFLAGS="${CFLAGS} -g -DwxDEBUG_LEVEL=1"
-   CXXFLAGS="${CXXFLAGS} -g -DwxDEBUG_LEVEL=1"
+   AC_MSG_NOTICE([Adding -O0 -g for debugging to CFLAGS and CXXFLAGS ...])
+   CFLAGS="${CFLAGS} -O0 -g -DwxDEBUG_LEVEL=1"
+   CXXFLAGS="${CXXFLAGS} -O0 -g -DwxDEBUG_LEVEL=1"
 else
    CFLAGS="${CFLAGS} -DwxDEBUG_LEVEL=0"
    CXXFLAGS="${CXXFLAGS} -DwxDEBUG_LEVEL=0"
@@ -676,6 +680,8 @@ dnl Check for lrint/lrintf
 AC_C99_FUNC_LRINT
 AC_C99_FUNC_LRINTF
 
+dnl Check for memory locking
+AC_CHECK_FUNCS_ONCE(mlock)
 
 if [[ "$use_ladspa" = "yes" ]] ; then
    AC_DEFINE(USE_LADSPA, 1,

@@ -11,23 +11,23 @@
 #ifndef __AUDACITY_MIXER_TOOLBAR__
 #define __AUDACITY_MIXER_TOOLBAR__
 
-#include "../MemoryX.h"
 #include "ToolBar.h"
 
-class wxImage;
 class wxSize;
 class wxPoint;
-class wxChoice;
-class wxStaticBitmap;
 
 class ASlider;
+class AudacityProject;
 
 class MixerToolBar final : public ToolBar {
 
  public:
 
-   MixerToolBar();
+   MixerToolBar( AudacityProject &project );
    virtual ~MixerToolBar();
+
+   static MixerToolBar &Get( AudacityProject &project );
+   static const MixerToolBar &Get( const AudacityProject &project );
 
    void Create(wxWindow * parent) override;
 
@@ -38,11 +38,15 @@ class MixerToolBar final : public ToolBar {
    void Populate() override;
    void Repaint(wxDC * WXUNUSED(dc)) override {};
    void EnableDisableButtons() override {};
+   int GetMinToolbarWidth() override { return 250; }
+   int GetInitialWidth()  override { return 327; }
 
    void OnFocus(wxFocusEvent &event);
    void OnCaptureKey(wxCommandEvent &event);
 
    void OnSlider(wxCommandEvent & event);
+
+   void OnAudioCapture(wxCommandEvent & event);
 
    void ShowOutputGainDialog();
    void ShowInputGainDialog();
@@ -63,6 +67,7 @@ class MixerToolBar final : public ToolBar {
 
    ASlider *mInputSlider;
    ASlider *mOutputSlider;
+   bool mEnabled;
 
  public:
 

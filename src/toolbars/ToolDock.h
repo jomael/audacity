@@ -14,7 +14,6 @@
 #define __AUDACITY_TOOLDOCK__
 
 #include <vector>
-#include "../MemoryX.h" // for std::move
 #include <wx/defs.h>
 
 #include "ToolBar.h"
@@ -28,7 +27,6 @@ class wxRect;
 class wxWindow;
 
 class GrabberEvent;
-class ToolManager;
 
 ////////////////////////////////////////////////////////////
 /// class ToolDock
@@ -114,7 +112,7 @@ public:
    // This iterator visits the nodes of the forest in pre-order, and at each
    // stop, reports its Place
    class Iterator
-      : public std::iterator<std::forward_iterator_tag, Place>
+      : public ValueIterator<Place>
    {
    public:
       const Place &operator * () const { return mPlace; }
@@ -291,7 +289,7 @@ class ToolDock final : public wxPanelWrapper
 {
 public:
 
-   ToolDock( ToolManager *manager, wxWindow *parent, int dockid );
+   ToolDock( wxEvtHandler *manager, wxWindow *parent, int dockid );
    ~ToolDock();
 
    bool AcceptsFocus() const override { return false; };
@@ -333,7 +331,7 @@ public:
 
 
 
-   ToolManager *mManager;
+   wxEvtHandler *mManager;
 
    // Stores adjacency relations that we want to realize in the dock layout
    ToolBarConfiguration mConfiguration;

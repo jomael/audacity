@@ -13,38 +13,24 @@
 #define __AUDACITY_MACRO_COMMAND_DIALOG__
 
 #include <wx/defs.h>
-#include <wx/string.h>
-
-
-#ifdef __WXMSW__
-    #include  <wx/ownerdrw.h>
-#endif
-
-//#include  "wx/log.h"
-#include  <wx/sizer.h>
-#include  <wx/menuitem.h>
-#include  <wx/checklst.h>
 
 #include "BatchCommands.h"
 
 class wxWindow;
-class wxCheckBox;
-class wxChoice;
 class wxTextCtrl;
-class wxStaticText;
-class wxRadioButton;
 class wxListCtrl;
 class wxListEvent;
 class wxButton;
+class AudacityProject;
 class ShuttleGui;
 
 class MacroCommandDialog final : public wxDialogWrapper {
  public:
    // constructors and destructors
-   MacroCommandDialog(wxWindow *parent, wxWindowID id);
-   void SetCommandAndParams(const wxString &Command, const wxString &Params);
+   MacroCommandDialog(wxWindow *parent, wxWindowID id, AudacityProject &project);
+   void SetCommandAndParams(const CommandID &Command, const wxString &Params);
  public:
-   wxString   mSelectedCommand;
+   CommandID   mSelectedCommand;
    wxString   mSelectedParameters;
  private:
    void Populate();
@@ -69,7 +55,7 @@ class MacroCommandDialog final : public wxDialogWrapper {
    wxTextCtrl * mParameters;
    wxTextCtrl * mDetails;
 
-   wxString mInternalCommandName;
+   CommandID mInternalCommandName;
 
    const MacroCommandsCatalog mCatalog;
 

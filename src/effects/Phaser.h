@@ -16,18 +16,13 @@
 #ifndef __AUDACITY_EFFECT_PHASER__
 #define __AUDACITY_EFFECT_PHASER__
 
-#include <wx/event.h>
-#include <wx/slider.h>
-#include <wx/string.h>
-#include <wx/textctrl.h>
-
 #include "Effect.h"
 
+class wxSlider;
+class wxTextCtrl;
 class ShuttleGui;
 
 #define NUM_STAGES 24
-
-#define PHASER_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Phaser") }
 
 class EffectPhaserState
 {
@@ -47,13 +42,15 @@ public:
 class EffectPhaser final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectPhaser();
    virtual ~EffectPhaser();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
    wxString ManualPage() override;
 
    // EffectDefinitionInterface implementation

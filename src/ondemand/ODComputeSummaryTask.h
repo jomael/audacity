@@ -21,7 +21,7 @@ updating the ODPCMAliasBlockFile and the GUI of the newly available data.
 
 #include <vector>
 #include "ODTask.h"
-#include "ODTaskThread.h"
+#include "../Internat.h"
 class ODPCMAliasBlockFile;
 class WaveTrack;
 
@@ -36,7 +36,7 @@ class ODComputeSummaryTask final : public ODTask
    ODComputeSummaryTask();
    virtual ~ODComputeSummaryTask(){};
 
-   movable_ptr<ODTask> Clone() const override;
+   std::unique_ptr<ODTask> Clone() const override;
 
    ///Subclasses should override to return respective type.
    unsigned int GetODType() override { return eODPCMSummary; }
@@ -44,7 +44,8 @@ class ODComputeSummaryTask final : public ODTask
    ///Return the task name
    const char* GetTaskName() override { return "ODComputeSummaryTask"; }
 
-   const wxChar* GetTip() override { return _("Import complete. Calculating waveform"); }
+   TranslatableString GetTip() override
+      { return XO("Import complete. Calculating waveform"); }
 
    bool UsesCustomWorkUntilPercentage() override { return true; }
    float ComputeNextWorkUntilPercentageComplete() override;

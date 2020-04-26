@@ -26,15 +26,18 @@
 
 #include "../Audacity.h"
 #include "ClickRemoval.h"
+#include "LoadEffects.h"
 
 #include <math.h>
 
 #include <wx/intl.h>
+#include <wx/slider.h>
 #include <wx/valgen.h>
 
 #include "../Prefs.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 #include "../widgets/valnum.h"
 
 #include "../WaveTrack.h"
@@ -50,6 +53,11 @@ enum
 //     Name       Type     Key               Def      Min      Max      Scale
 Param( Threshold, int,     wxT("Threshold"),  200,     0,       900,     1  );
 Param( Width,     int,     wxT("Width"),      20,      0,       40,      1  );
+
+const ComponentInterfaceSymbol EffectClickRemoval::Symbol
+{ XO("Click Removal") };
+
+namespace{ BuiltinEffectsModule::Registration< EffectClickRemoval > reg; }
 
 BEGIN_EVENT_TABLE(EffectClickRemoval, wxEvtHandler)
     EVT_SLIDER(ID_Thresh, EffectClickRemoval::OnThreshSlider)
@@ -73,16 +81,16 @@ EffectClickRemoval::~EffectClickRemoval()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectClickRemoval::GetSymbol()
+ComponentInterfaceSymbol EffectClickRemoval::GetSymbol()
 {
-   return CLICKREMOVAL_PLUGIN_SYMBOL;
+   return Symbol;
 }
 
-wxString EffectClickRemoval::GetDescription()
+TranslatableString EffectClickRemoval::GetDescription()
 {
-   return _("Click Removal is designed to remove clicks on audio tracks");
+   return XO("Click Removal is designed to remove clicks on audio tracks");
 }
 
 wxString EffectClickRemoval::ManualPage()
@@ -172,10 +180,8 @@ bool EffectClickRemoval::Process()
    bool bGoodResult = true;
    mbDidSomething = false;
 
-   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks.get());
-   WaveTrack *track = (WaveTrack *) iter.First();
    int count = 0;
-   while (track) {
+   for( auto track : mOutputTracks->Selected< WaveTrack >() ) {
       double trackStart = track->GetStartTime();
       double trackEnd = track->GetEndTime();
       double t0 = mT0 < trackStart? trackStart: mT0;
@@ -193,13 +199,12 @@ bool EffectClickRemoval::Process()
          }
       }
 
-      track = (WaveTrack *) iter.Next();
       count++;
    }
    if (bGoodResult && !mbDidSomething) // Processing successful, but ineffective.
       Effect::MessageBox(
-         _("Algorithm not effective on this audio. Nothing changed."),
-         wxOK | wxICON_ERROR);
+         XO("Algorithm not effective on this audio. Nothing changed."),
+         wxOK | wxICON_ERROR );
 
    this->ReplaceProcessedTracks(bGoodResult && mbDidSomething);
    return bGoodResult && mbDidSomething;
@@ -210,9 +215,9 @@ bool EffectClickRemoval::ProcessOne(int count, WaveTrack * track, sampleCount st
    if (len <= windowSize / 2)
    {
       Effect::MessageBox(
-         wxString::Format(_("Selection must be larger than %d samples."),
-                          windowSize / 2),
-         wxOK | wxICON_ERROR);
+         XO("Selection must be larger than %d samples.")
+            .Format(windowSize / 2),
+         wxOK | wxICON_ERROR );
       return false;
    }
 
@@ -339,32 +344,36 @@ void EffectClickRemoval::PopulateOrExchange(ShuttleGui & S)
    S.SetStretchyCol(2);
    {
       // Threshold
-      IntegerValidator<int> vldThresh(&mThresholdLevel);
-      vldThresh.SetRange(MIN_Threshold, MAX_Threshold);
-      mThreshT = S.Id(ID_Thresh).AddTextBox(_("Threshold (lower is more sensitive):"),
-                                            wxT(""),
-                                            10);
-      mThreshT->SetValidator(vldThresh);
+      mThreshT = S.Id(ID_Thresh)
+         .Validator<IntegerValidator<int>>(
+            &mThresholdLevel, NumValidatorStyle::DEFAULT,
+            MIN_Threshold, MAX_Threshold
+         )
+         .AddTextBox(XO("&Threshold (lower is more sensitive):"),
+                     wxT(""),
+                     10);
 
-      S.SetStyle(wxSL_HORIZONTAL);
-      mThreshS = S.Id(ID_Thresh).AddSlider( {}, mThresholdLevel, MAX_Threshold, MIN_Threshold);
-      mThreshS->SetName(_("Threshold"));
-      mThreshS->SetValidator(wxGenericValidator(&mThresholdLevel));
-      mThreshS->SetMinSize(wxSize(150, -1));
+      mThreshS = S.Id(ID_Thresh)
+         .Name(XO("Threshold"))
+         .Style(wxSL_HORIZONTAL)
+         .Validator<wxGenericValidator>(&mThresholdLevel)
+         .MinSize( { 150, -1 } )
+         .AddSlider( {}, mThresholdLevel, MAX_Threshold, MIN_Threshold);
 
       // Click width
-      IntegerValidator<int> vldWidth(&mClickWidth);
-      vldWidth.SetRange(MIN_Width, MAX_Width);
-      mWidthT = S.Id(ID_Width).AddTextBox(_("Max Spike Width (higher is more sensitive):"),
-                                          wxT(""),
-                                          10);
-      mWidthT->SetValidator(vldWidth);
+      mWidthT = S.Id(ID_Width)
+         .Validator<IntegerValidator<int>>(
+            &mClickWidth, NumValidatorStyle::DEFAULT, MIN_Width, MAX_Width)
+         .AddTextBox(XO("Max &Spike Width (higher is more sensitive):"),
+                     wxT(""),
+                     10);
 
-      S.SetStyle(wxSL_HORIZONTAL);
-      mWidthS = S.Id(ID_Width).AddSlider( {}, mClickWidth, MAX_Width, MIN_Width);
-      mWidthS->SetName(_("Max Spike Width"));
-      mWidthS->SetValidator(wxGenericValidator(&mClickWidth));
-      mWidthS->SetMinSize(wxSize(150, -1));
+      mWidthS = S.Id(ID_Width)
+         .Name(XO("Max Spike Width"))
+         .Style(wxSL_HORIZONTAL)
+         .Validator<wxGenericValidator>(&mClickWidth)
+         .MinSize( { 150, -1 } )
+         .AddSlider( {}, mClickWidth, MAX_Width, MIN_Width);
    }
    S.EndMultiColumn();
 

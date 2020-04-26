@@ -50,11 +50,9 @@ out.
 #include <wx/ffile.h>
 #include <wx/log.h>
 
-#include "Internat.h"
-#include "MemoryX.h"
 #include "sndfile.h"
+#include "FileException.h"
 #include "FileFormats.h"
-#include "AudacityApp.h"
 
 // msmeyer: Define this to add debug output via wxPrintf()
 //#define DEBUG_BLOCKFILE
@@ -135,6 +133,16 @@ void BlockFile::SetFileName(wxFileNameWrapper &&name)
    mFileName=std::move(name);
 }
 
+const wxFileNameWrapper &BlockFile::GetExternalFileName() const
+{
+   static wxFileNameWrapper empty;
+   return empty;
+}
+
+void BlockFile::SetExternalFileName( wxFileNameWrapper && )
+{
+   wxASSERT( false );
+}
 
 /// Marks this BlockFile as "locked."  A locked BlockFile may not
 /// be moved or deleted, only copied.  Locking a BlockFile prevents
@@ -480,6 +488,23 @@ bool BlockFile::Read64K(float *buffer,
    return result;
 }
 
+namespace {
+   BlockFile::MissingAliasFileFoundHook &GetMissingAliasFileFound()
+   {
+      static BlockFile::MissingAliasFileFoundHook theHook;
+      return theHook;
+   }
+}
+
+auto BlockFile::SetMissingAliasFileFound( MissingAliasFileFoundHook hook )
+   -> MissingAliasFileFoundHook
+{
+   auto &theHook = GetMissingAliasFileFound();
+   auto result = theHook;
+   theHook = hook;
+   return result;
+}
+
 size_t BlockFile::CommonReadData(
    bool mayThrow,
    const wxFileName &fileName, bool &mSilentLog,
@@ -520,9 +545,9 @@ size_t BlockFile::CommonReadData(
    SFFile sf;
 
    {
-      Maybe<wxLogNull> silence{};
+      Optional<wxLogNull> silence{};
       if (mSilentLog)
-         silence.create();
+         silence.emplace();
 
       const auto fullPath = fileName.GetFullPath();
       if (wxFile::Exists(fullPath) && f.Open(fullPath)) {
@@ -538,8 +563,9 @@ size_t BlockFile::CommonReadData(
 
          if (pAliasFile) {
             // Set a marker to display an error message for the silence
-            if (!wxGetApp().ShouldShowMissingAliasedFileWarning())
-               wxGetApp().MarkAliasedFilesMissingWarning(pAliasFile);
+            auto hook = GetMissingAliasFileFound();
+            if (hook)
+               hook( pAliasFile );
          }
       }
    }
@@ -562,7 +588,7 @@ size_t BlockFile::CommonReadData(
              format == int16Sample &&
              sf_subtype_is_integer(info.format)) {
             // If both the src and dest formats are integer formats,
-            // read integers directly from the file, comversions not needed
+            // read integers directly from the file, conversions not needed
             framesRead = SFCall<sf_count_t>(
                sf_readf_short, sf.get(), (short *)data, len);
          }
@@ -708,6 +734,16 @@ AliasBlockFile::~AliasBlockFile()
 {
 }
 
+const wxFileNameWrapper &AliasBlockFile::GetExternalFileName() const
+{
+   return GetAliasedFileName();
+}
+
+void AliasBlockFile::SetExternalFileName( wxFileNameWrapper &&newName )
+{
+   ChangeAliasedFileName( std::move( newName ) );
+}
+
 /// Read the summary of this alias block from disk.  Since the audio data
 /// is elsewhere, this consists of reading the entire summary file.
 /// Fill with zeroes and return false if data are unavailable for any reason.
@@ -720,9 +756,9 @@ bool AliasBlockFile::ReadSummary(ArrayOf<char> &data)
    wxFFile summaryFile(mFileName.GetFullPath(), wxT("rb"));
 
    {
-      Maybe<wxLogNull> silence{};
+      Optional<wxLogNull> silence{};
       if (mSilentLog)
-         silence.create();
+         silence.emplace();
 
       if (!summaryFile.IsOpened()){
 

@@ -10,9 +10,8 @@
 
 #include "MemoryX.h"
 #include <wx/defs.h>
-#include <wx/colour.h>
-#include "Theme.h"
 
+class wxColour;
 class wxImage;
 
 // This looks at the first pixel in the image, and shifts
@@ -41,6 +40,9 @@ std::unique_ptr<wxImage> OverlayImage(wxImage * background, wxImage * foreground
                       wxImage * mask, int xoff, int yoff);
 
 
+// JKC: will probably change name from 'teBmps' to 'tIndexBmp';
+typedef int teBmps; /// The index of a bitmap resource in Theme Resources.
+
 // Same idea, but this time the mask is an alpha channel in
 // the foreground bitmap, and it's all retrieved from Themes.
 std::unique_ptr<wxImage> OverlayImage(teBmps eBack, teBmps eForeground,
@@ -61,5 +63,5 @@ std::unique_ptr<wxImage> CreateSysBackground(int width, int height, int offset,
 // Pastes one image into another at specified location.
 void PasteSubImage( wxImage * pDest, wxImage * pSrc, int x, int y );
 
-// Gets a rectangle from within anothe rimage, INCLUDING the alpha channel
+// Gets a rectangle from within another image, INCLUDING the alpha channel
 wxImage GetSubImageWithAlpha( const wxImage & Src,  const wxRect &rect );

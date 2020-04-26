@@ -16,9 +16,15 @@ Describes shared object that is used to access FFmpeg libraries.
 #if !defined(__AUDACITY_FFMPEG__)
 #define __AUDACITY_FFMPEG__
 
-#include "MemoryX.h"
+#include "Audacity.h" // for USE_* macros
 
-#include "Internat.h"
+#include "widgets/wxPanelWrapper.h" // to inherit
+
+#if defined(__WXMSW__)
+#include <wx/msw/registry.h> // for wxRegKey
+#endif
+
+class wxCheckBox;
 
 // TODO: Determine whether the libav* headers come from the FFmpeg or libav
 // project and set IS_FFMPEG_PROJECT depending on it.
@@ -46,6 +52,7 @@ extern "C" {
 
    #include <libavcodec/avcodec.h>
    #include <libavformat/avformat.h>
+   #include <libavutil/error.h>
    #include <libavutil/fifo.h>
    #include <libavutil/mathematics.h>
 
@@ -144,22 +151,14 @@ extern "C" {
 }
 #endif
 
-#include "Audacity.h"
-#include "Experimental.h"
-
 /* rather earlier than normal, but pulls in config*.h and other program stuff
  * we need for the next bit */
-#include <wx/string.h>
-#include <wx/dynlib.h>
-#include <wx/log.h>      // for wxLogNull
-#include <wx/utils.h>
-#include "widgets/LinkingHtmlWindow.h"
 #include "ShuttleGui.h"
 #include "Prefs.h"
-#include <wx/checkbox.h>
-#include <wx/textctrl.h>
 
 #include "audacity/Types.h"
+
+class wxDynamicLibrary;
 
 // if you needed them, any other audacity header files would go here
 
@@ -189,53 +188,11 @@ class FFmpegNotFoundDialog final : public wxDialogWrapper
 {
 public:
 
-   FFmpegNotFoundDialog(wxWindow *parent)
-      :  wxDialogWrapper(parent, wxID_ANY, wxString(_("FFmpeg not found")))
-   {
-      SetName(GetTitle());
-      ShuttleGui S(this, eIsCreating);
-      PopulateOrExchange(S);
-   }
+   FFmpegNotFoundDialog(wxWindow *parent);
 
-   void PopulateOrExchange(ShuttleGui & S)
-   {
-      wxString text;
+   void PopulateOrExchange(ShuttleGui & S);
 
-      S.SetBorder(10);
-      S.StartVerticalLay(true);
-      {
-         S.AddFixedText(_(
-"Audacity attempted to use FFmpeg to import an audio file,\n\
-but the libraries were not found.\n\n\
-To use FFmpeg import, go to Preferences > Libraries\n\
-to download or locate the FFmpeg libraries."
-         ));
-
-         int dontShowDlg = 0;
-         gPrefs->Read(wxT("/FFmpeg/NotFoundDontShow"),&dontShowDlg,0);
-         mDontShow = S.AddCheckBox(_("Do not show this warning again"),dontShowDlg ? wxT("true") : wxT("false"));
-
-         S.AddStandardButtons(eOkButton);
-      }
-      S.EndVerticalLay();
-
-      Layout();
-      Fit();
-      SetMinSize(GetSize());
-      Center();
-
-      return;
-   }
-
-   void OnOk(wxCommandEvent & WXUNUSED(event))
-   {
-      if (mDontShow->GetValue())
-      {
-         gPrefs->Write(wxT("/FFmpeg/NotFoundDontShow"),1);
-         gPrefs->Flush();
-      }
-      this->EndModal(0);
-   }
+   void OnOk(wxCommandEvent & WXUNUSED(event));
 
 private:
 
@@ -286,10 +243,14 @@ public:
 #if defined(__WXMSW__)
    /* Library names and file filters for Windows only */
 
-   wxString GetLibraryTypeString()
+   FileNames::FileTypes GetLibraryTypes()
    {
-      /* i18n-hint: do not translate avformat.  Preserve the computer gibberish.*/
-      return _("Only avformat.dll|*avformat*.dll|Dynamically Linked Libraries (*.dll)|*.dll|All Files|*");
+      return {
+         /* i18n-hint: do not translate avformat.  Preserve the computer gibberish.*/
+         { XO("Only avformat.dll"), { wxT("avformat.dll") } },
+         FileNames::DynamicLibraries,
+         FileNames::AllFiles
+      };
    }
 
    wxString GetLibAVFormatPath()
@@ -320,9 +281,12 @@ public:
    }
 #elif defined(__WXMAC__)
    /* Library names and file filters for Mac OS only */
-   wxString GetLibraryTypeString()
+   FileNames::FileTypes GetLibraryTypes()
    {
-      return _("Dynamic Libraries (*.dylib)|*.dylib|All Files (*)|*");
+      return {
+         FileNames::DynamicLibraries,
+         FileNames::AllFiles
+      };
    }
 
    wxString GetLibAVFormatPath()
@@ -332,24 +296,34 @@ public:
 
    wxString GetLibAVFormatName()
    {
+      if (sizeof(void*) == 8)
+         return (wxT("ffmpeg.") wxT(AV_STRINGIFY(LIBAVFORMAT_VERSION_MAJOR)) wxT(".64bit.dylib"));
       return (wxT("libavformat.") wxT(AV_STRINGIFY(LIBAVFORMAT_VERSION_MAJOR)) wxT(".dylib"));
    }
 
    wxString GetLibAVCodecName()
    {
+      if (sizeof(void*) == 8)
+         return (wxT("ffmpeg_codecs.") wxT(AV_STRINGIFY(LIBAVCODEC_VERSION_MAJOR)) wxT(".64bit.dylib"));
       return (wxT("libavcodec.") wxT(AV_STRINGIFY(LIBAVCODEC_VERSION_MAJOR)) wxT(".dylib"));
    }
 
    wxString GetLibAVUtilName()
    {
+      if (sizeof(void*) == 8)
+         return (wxT("ffmpeg_utils.") wxT(AV_STRINGIFY(LIBAVUTIL_VERSION_MAJOR)) wxT(".64bit.dylib"));
       return (wxT("libavutil.") wxT(AV_STRINGIFY(LIBAVUTIL_VERSION_MAJOR)) wxT(".dylib"));
    }
 #else
    /* Library names and file filters for other platforms, basically Linux and
     * other *nix platforms */
-   wxString GetLibraryTypeString()
+   FileNames::FileTypes GetLibraryTypes()
    {
-      return _("Only libavformat.so|libavformat*.so*|Dynamically Linked Libraries (*.so*)|*.so*|All Files (*)|*");
+      return {
+         { XO("Only libavformat.so"), { wxT("libavformat*.so*") } },
+         FileNames::DynamicLibraries,
+         FileNames::AllFiles
+      };
    }
 
    wxString GetLibAVFormatPath()
@@ -401,7 +375,7 @@ private:
 FFmpegLibs *PickFFmpegLibs();
 
 ///! Helper function - destroys FFmpegLibs object if there is no need for it
-///! anymore, or just decrements it's reference count
+///! anymore, or just decrements its reference count
 void        DropFFmpegLibs();
 
 // This object allows access to the AVFormatContext,
@@ -414,8 +388,8 @@ struct FFmpegContext {
    AVFormatContext *ic_ptr{};
 };
 
-int ufile_fopen(AVIOContext **s, const wxString & name, int flags);
-int ufile_fopen_input(std::unique_ptr<FFmpegContext> &context_ptr, wxString & name);
+int ufile_fopen(AVIOContext **s, const FilePath & name, int flags);
+int ufile_fopen_input(std::unique_ptr<FFmpegContext> &context_ptr, FilePath & name);
 int ufile_close(AVIOContext *pb);
 
 struct streamContext;
@@ -456,12 +430,12 @@ extern "C" {
    //
    // The FFMPEG_FUNCTION_WITH_RETURN takes 4 arguments:
    // 1)  The return type           <---|
-   // 2)  The function name             | Taken from the FFmpeg funciton prototype
+   // 2)  The function name             | Taken from the FFmpeg function prototype
    // 3)  The function arguments    <---|
    // 4)  The argument list to pass to the real function
    //
    // The FFMPEG_FUNCTION_NO_RETURN takes 3 arguments:
-   // 1)  The function name         <---| Taken from the FFmpeg funciton prototype
+   // 1)  The function name         <---| Taken from the FFmpeg function prototype
    // 2)  The function arguments    <---|
    // 3)  The argument list to pass to the real function
    //
@@ -553,6 +527,12 @@ extern "C" {
       av_get_default_channel_layout,
       (int nb_channels),
       (nb_channels)
+   );
+   FFMPEG_FUNCTION_WITH_RETURN(
+      int,
+      av_strerror,
+      (int errnum, char *errbuf, size_t errbuf_size),
+      (errnum, errbuf, errbuf_size)
    );
 
    //
@@ -952,6 +932,9 @@ private:
 // utilites for RAII:
 
 // Deleter adaptor for functions like av_free that take a pointer
+
+/// \brief AV_Deleter is part of FFmpeg support.  It's used with the RAII
+/// idiom.
 template<typename T, typename R, R(*Fn)(T*)> struct AV_Deleter {
    inline R operator() (T* p) const
    {
@@ -996,6 +979,9 @@ using AVCodecContextHolder = std::unique_ptr<
 using AVDictionaryCleanup = std::unique_ptr<
    AVDictionary*, AV_Deleter<AVDictionary*, void, av_dict_free>
 >;
+
+/// \brief FFmpeg structure to hold a file pointer and provide a return 
+/// value when closing the file.
 struct UFileHolder : public std::unique_ptr<
    AVIOContext, ::AV_Deleter<AVIOContext, int, ufile_close>
 >
@@ -1026,7 +1012,7 @@ struct streamContext
    AVStream            *m_stream{};                        // an AVStream *
    AVCodecContext      *m_codecCtx{};                      // pointer to m_stream->codec
 
-   Maybe<AVPacketEx>    m_pkt;                           // the last AVPacket we read for this stream
+   Optional<AVPacketEx>    m_pkt;                           // the last AVPacket we read for this stream
    uint8_t             *m_pktDataPtr{};                    // pointer into m_pkt.data
    int                  m_pktRemainingSiz{};
 

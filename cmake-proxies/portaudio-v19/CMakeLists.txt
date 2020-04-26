@@ -1,142 +1,246 @@
-#directory cmake-proxies/portaudio-v19
-set( TARGET portaudio-v19 )
-set( TARGET_SOURCE ${LIB_SRC_DIRECTORY}${TARGET} )
-project( ${TARGET} )
 
-set( SOURCES 
-#${LIB_SRC_DIRECTORY}portaudio-v19/bindings/java/c/src/com_portaudio_BlockingStream.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/bindings/java/c/src/com_portaudio_PortAudio.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/bindings/java/c/src/jpa_tools.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_mono_asio_channel_select.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_ocean_shore.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_pink.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_read_write_wire.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_record.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_record_file.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_saw.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_sine.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_wmme_ac3.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_wmme_surround.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_write_sine.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_write_sine_nonint.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/pa_devs.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/examples/pa_fuzz.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/pablio/pablio.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/pablio/test_rw.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/pablio/test_rw_echo.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/pablio/test_w_saw.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/pablio/test_w_saw8.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/qa/paqa_devs.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/qa/paqa_errs.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/qa/paqa_latency.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/qa/loopback/src/audio_analyzer.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/qa/loopback/src/biquad_filter.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/qa/loopback/src/paqa.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/qa/loopback/src/paqa_tools.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/qa/loopback/src/test_audio_analyzer.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/qa/loopback/src/write_wav.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/common/pa_allocation.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/common/pa_converters.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/common/pa_cpuload.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/common/pa_debugprint.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/common/pa_dither.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/common/pa_dynload.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/common/pa_front.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/common/pa_process.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/common/pa_ringbuffer.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/common/pa_stream.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/common/pa_trace.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/alsa/pa_linux_alsa.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/asihpi/pa_linux_asihpi.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/coreaudio/pa_mac_core.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/coreaudio/pa_mac_core_blocking.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/coreaudio/pa_mac_core_old.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/coreaudio/pa_mac_core_utilities.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/dsound/pa_win_ds.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/dsound/pa_win_ds_dynlink.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/jack/pa_jack.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/jack/pa_jack_dynload.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/oss/pa_unix_oss.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/oss/recplay.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/skeleton/pa_hostapi_skeleton.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/wasapi/pa_win_wasapi.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/wdmks/pa_win_wdmks.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/wmme/pa_win_wmme.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/os/unix/pa_unix_hostapis.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/os/unix/pa_unix_util.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/os/win/pa_win_coinitialize.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/os/win/pa_win_hostapis.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/os/win/pa_win_util.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/os/win/pa_win_waveformat.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/os/win/pa_win_wdmks_utils.c
-${LIB_SRC_DIRECTORY}portaudio-v19/src/os/win/pa_x86_plain_converters.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest1.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_buffer.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_callbackstop.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_clip.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_converters.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_dither.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_dsound_find_best_latency_params.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_dsound_low_level_latency_params.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_dsound_surround.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_hang.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_in_overflow.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_jack_wasapi.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_latency.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_leftright.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_longsine.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_many.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_maxsines.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_mono.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_multi_sine.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_out_underflow.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_prime.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_read_record.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_ringmix.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_sine8.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_sine_channelmaps.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_sine_formats.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_sine_srate.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_sine_time.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_start_stop.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_stop.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_stop_playout.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_suggested_vs_streaminfo_latency.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_sync.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_timing.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_toomanysines.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_two_rates.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_underflow.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_wire.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_wmme_find_best_latency_params.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_wmme_low_level_latency_params.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/patest_write_stop.c
-#${LIB_SRC_DIRECTORY}portaudio-v19/test/pa_minlat.c
+add_library( ${TARGET} STATIC )
 
-##${LIB_SRC_DIRECTORY}portaudio-v19/examples/paex_sine_c++.cpp
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/asio/iasiothiscallresolver.cpp
-#${LIB_SRC_DIRECTORY}portaudio-v19/src/hostapi/asio/pa_asio.cpp
+def_vars()
 
-)
-# This defines the #define on both Windows and Linux.
-add_definitions( 
--D_LIB
- )
-add_library( ${TARGET} STATIC ${SOURCES})
+set( CMAKE_MODULE_PATH ${TARGET_ROOT}/cmake_support )
 
-#if(MSVC)
-#FIX-ME What a horrible hacky place for a config file!
-    add_definitions(/FI"${top_dir}/win/Projects/${TARGET}/Debug/config.h")
-#else()
-    # GCC or Clang
-#    add_definitions(-include ${top_dir}/win/Projects/${TARGET}/config.h)
-#endif()
+# Define the platform specific interface options
+if( CMAKE_SYSTEM_NAME MATCHES "Windows" )
+   cmd_option(
+      ${_OPT}use_pa_ds
+      "Use the portaudio DirectSound interface if available"
+      YES
+   )
+   cmd_option(
+      ${_OPT}use_pa_wasapi
+      "Use the portaudio WASAPI interface if available"
+      YES
+   )
+   cmd_option(
+      ${_OPT}use_pa_wmme
+      "Use the portaudio WMME interface if available"
+      YES
+   )
+else()
+   # Look for OSS if the user wants it
+   cmd_option(
+      ${_OPT}use_pa_oss
+      "Use the OSS audio interface if available"
+      YES
+   )
 
-target_include_directories( ${TARGET} PRIVATE 
-${TARGET_SOURCE}/include
-${TARGET_SOURCE}/src/common
-${TARGET_SOURCE}/src/os/win
-${TARGET_SOURCE}
+   if( ${_OPT}use_pa_oss )
+      find_path( OSS_INCLUDE NAMES sys/soundcard.h )
+      mark_as_advanced( FORCE OSS_INCLUDE )
+
+      if( OSS_INCLUDE )
+         set( OSS_INCLUDE_DIRS ${OSS_INCLUDE} )
+      endif()
+
+      find_library( OSS_LIBRARY NAMES ossaudio )
+      mark_as_advanced( FORCE OSS_LIBRARY )
+
+      if( OSS_LIBRARY )
+         set( OSS_LIBRARIES ${OSS_LIBRARY} )
+      endif()
+
+      if( NOT OSS_INCLUDE_DIRS )
+         set_cache_value( ${_OPT}use_pa_oss NO )
+      endif()
+   endif()
+
+   if( CMAKE_SYSTEM_NAME MATCHES "Darwin" )
+      cmd_option(
+         ${_OPT}use_pa_coreaudio
+         "Use the portaudio CoreAudio interface if available"
+         YES
+      )
+   elseif( CMAKE_SYSTEM_NAME MATCHES "Linux|FreeBSD" )
+      cmd_option(
+         ${_OPT}use_pa_alsa
+         "Use the portaudio ALSA interface if available"
+         YES
+      )
+
+      if( ${_OPT}use_pa_alsa )
+         find_package( ALSA )
+         if( NOT ALSA_FOUND )
+            set_cache_value( ${_OPT}use_pa_alsa NO )
+         endif()
+      endif()
+   endif()
+endif()
+
+# JACK can be dynamically loaded, linked to, or off
+cmd_option( ${_OPT}use_pa_jack
+            "Use the JACK audio interface if available [loaded, linked, off]"
+            "linked"
+            STRINGS "loaded" "linked" "off"
 )
 
-target_link_libraries( ${TARGET} )
+if( NOT ${_OPT}use_pa_jack STREQUAL "off" )
+   # Find it
+   find_package( Jack )
+   if( NOT JACK_FOUND)
+      set_cache_value( ${_OPT}use_pa_jack "off" )
+   endif()
+endif()
+
+list( APPEND SOURCES
+   PRIVATE
+      ${TARGET_ROOT}/src/common/pa_allocation.c
+      ${TARGET_ROOT}/src/common/pa_converters.c
+      ${TARGET_ROOT}/src/common/pa_cpuload.c
+      ${TARGET_ROOT}/src/common/pa_debugprint.c
+      ${TARGET_ROOT}/src/common/pa_dither.c
+      ${TARGET_ROOT}/src/common/pa_dynload.c
+      ${TARGET_ROOT}/src/common/pa_front.c
+      ${TARGET_ROOT}/src/common/pa_process.c
+      ${TARGET_ROOT}/src/common/pa_ringbuffer.c
+      ${TARGET_ROOT}/src/common/pa_stream.c
+      ${TARGET_ROOT}/src/common/pa_trace.c
+
+      $<$<PLATFORM_ID:Windows>:
+         ${TARGET_ROOT}/src/os/win/pa_win_coinitialize.c
+         ${TARGET_ROOT}/src/os/win/pa_win_hostapis.c
+         ${TARGET_ROOT}/src/os/win/pa_win_util.c
+         ${TARGET_ROOT}/src/os/win/pa_win_waveformat.c
+         ${TARGET_ROOT}/src/os/win/pa_win_wdmks_utils.c
+         $<$<C_COMPILER_ID:MSVC>:
+            ${TARGET_ROOT}/src/os/win/pa_x86_plain_converters.c
+         >
+      >
+
+      $<$<PLATFORM_ID:Darwin>:
+         ${TARGET_ROOT}/src/hostapi/coreaudio/pa_mac_core.c
+         ${TARGET_ROOT}/src/hostapi/coreaudio/pa_mac_core_blocking.c
+         ${TARGET_ROOT}/src/hostapi/coreaudio/pa_mac_core_utilities.c
+      >
+
+      $<$<PLATFORM_ID:Darwin,Linux,FreeBSD,CYGWIN>:
+         ${TARGET_ROOT}/src/os/unix/pa_unix_hostapis.c
+         ${TARGET_ROOT}/src/os/unix/pa_unix_util.c
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_ds}>:
+         ${TARGET_ROOT}/src/hostapi/dsound/pa_win_ds.c
+         ${TARGET_ROOT}/src/hostapi/dsound/pa_win_ds_dynlink.c
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_wasapi}>:
+         ${TARGET_ROOT}/src/hostapi/wasapi/pa_win_wasapi.c
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_wmme}>:
+         ${TARGET_ROOT}/src/hostapi/wmme/pa_win_wmme.c
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_alsa}>:
+         ${TARGET_ROOT}/src/hostapi/alsa/pa_linux_alsa.c
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_oss}>:
+         ${TARGET_ROOT}/src/hostapi/oss/pa_unix_oss.c
+      >
+
+      $<$<NOT:$<STREQUAL:${${_OPT}use_pa_jack},off>>:
+         ${TARGET_ROOT}/src/hostapi/jack/pa_jack.c
+         ${TARGET_ROOT}/src/hostapi/jack/pa_jack_dynload.c
+      >
+)
+
+list( APPEND INCLUDES
+   PRIVATE
+      ${TARGET_ROOT}/src/common
+
+      $<$<PLATFORM_ID:Windows>:
+         ${TARGET_ROOT}/src/os/win
+      >
+
+      $<$<PLATFORM_ID:Darwin,Linux,FreeBSD,CYGWIN>:
+         ${TARGET_ROOT}/src/os/unix
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_ds}>:
+         ${TARGET_ROOT}/src/hostapi/dsound
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_coreaudio}>:
+         ${TARGET_ROOT}/src/hostapi/coreaudio
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_alsa}>:
+         ${ALSA_INCLUDE_DIRS}
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_oss}>:
+         ${OSS_INCLUDE_DIRS}
+      >
+
+      $<$<NOT:$<STREQUAL:${${_OPT}use_pa_jack},off>>:
+         ${TARGET_ROOT}/src/hostapi/jack
+         ${JACK_INCLUDE_DIRS}
+      >
+
+   PUBLIC
+      ${TARGET_ROOT}/include
+)
+
+list( APPEND DEFINES
+   PUBLIC
+      $<$<BOOL:${${_OPT}use_pa_ds}>:
+         PA_USE_DS=1
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_wasapi}>:
+         PA_USE_WASAPI=1
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_wmme}>:
+         PA_USE_WMME=1
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_coreaudio}>:
+         PA_USE_COREAUDIO=1
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_alsa}>:
+         PA_USE_ALSA=1
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_oss}>:
+         PA_USE_OSS=1
+         HAVE_SYS_SOUNDCARD_H=1
+      >
+
+      $<$<NOT:$<STREQUAL:${${_OPT}use_pa_jack},off>>:
+         PA_USE_JACK=1
+      >
+
+      $<$<STREQUAL:${${_OPT}use_pa_jack},dynamic>:
+         PA_DYNAMIC_JACK=1
+      >
+)
+
+list( APPEND LIBRARIES
+   INTERFACE
+      $<$<BOOL:${${_OPT}use_pa_alsa}>:
+         ${ALSA_LIBRARIES}
+      >
+
+      $<$<BOOL:${${_OPT}use_pa_oss}>:
+         ${OSS_LIBRARIES}
+      >
+
+      $<$<NOT:$<STREQUAL:${${_OPT}use_pa_jack},off>>:
+         ${JACK_LIBRARIES}
+      >
+)
+
+organize_source( "${TARGET_ROOT}" "" "${SOURCES}" )
+target_sources( ${TARGET} PRIVATE ${SOURCES} )
+target_compile_definitions( ${TARGET} PRIVATE ${DEFINES} )
+target_include_directories( ${TARGET} PRIVATE ${INCLUDES} )
+target_link_libraries( ${TARGET} PRIVATE ${LIBRARIES} )
+

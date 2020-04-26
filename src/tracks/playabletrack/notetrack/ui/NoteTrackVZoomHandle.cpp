@@ -8,18 +8,20 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../../../Audacity.h"
-
+#include "../../../../Audacity.h" // for USE_* macros
 #ifdef USE_MIDI
-
 #include "NoteTrackVZoomHandle.h"
+
 #include "../../../../Experimental.h"
-#include "NoteTrackVRulerControls.h"
+
+#include "../../../ui/TrackVRulerControls.h"
 
 #include "../../../../HitTestResult.h"
 #include "../../../../NoteTrack.h"
 #include "../../../../Project.h"
+#include "../../../../ProjectHistory.h"
 #include "../../../../RefreshCode.h"
+#include "../../../../TrackArtist.h"
 #include "../../../../TrackPanelMouseEvent.h"
 #include "../../../../widgets/PopupMenuTable.h"
 #include "../../../../../images/Cursors.h"
@@ -33,6 +35,7 @@ namespace
    struct InitMenuData
    {
    public:
+      AudacityProject &project;
       NoteTrack *pTrack;
       wxRect rect;
       unsigned result;
@@ -57,7 +60,7 @@ NoteTrackVZoomHandle::NoteTrackVZoomHandle
 {
 }
 
-void NoteTrackVZoomHandle::Enter(bool)
+void NoteTrackVZoomHandle::Enter(bool, AudacityProject *)
 {
 #ifdef EXPERIMENTAL_TRACK_PANEL_HIGHLIGHTING
    mChangeHighlight = RefreshCode::RefreshCell;
@@ -76,8 +79,8 @@ HitTestPreview NoteTrackVZoomHandle::HitPreview(const wxMouseState &state)
    gPrefs->Read(wxT("/GUI/VerticalZooming"), &bVZoom, false);
    bVZoom &= !state.RightIsDown();
    const auto message = bVZoom ? 
-      _("Click to vertically zoom in. Shift-click to zoom out. Drag to specify a zoom region.") :
-      _("Right-click for menu.");
+      XO("Click to vertically zoom in. Shift-click to zoom out. Drag to specify a zoom region.") :
+      XO("Right-click for menu.");
 
    return {
       message,
@@ -117,7 +120,7 @@ UIHandle::Result NoteTrackVZoomHandle::Drag
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
    using namespace RefreshCode;
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto pTrack = TrackList::Get( *pProject ).Lock(mpTrack);
    if (!pTrack)
       return Cancelled;
 
@@ -132,21 +135,10 @@ UIHandle::Result NoteTrackVZoomHandle::Drag
 }
 
 HitTestPreview NoteTrackVZoomHandle::Preview
-(const TrackPanelMouseState &st, const AudacityProject *)
+(const TrackPanelMouseState &st, AudacityProject *)
 {
    return HitPreview(st.state);
 }
-
-// Note that these can be with or without spectrum view which
-// adds a constant.
-//const int kZoom1to1 = 1;
-//const int kZoomTimes2 = 2;
-//const int kZoomDiv2 = 3;
-//const int kZoomHalfWave = 4;
-//const int kZoomInByDrag = 5;
-const int kZoomIn = 6;
-const int kZoomOut = 7;
-const int kZoomReset = 8;
 
 enum {
    OnZoomFitVerticalID = 20000,
@@ -157,20 +149,19 @@ enum {
    OnZoomInVerticalID,
    OnZoomOutVerticalID,
 
-   // Reserve an ample block of ids for waveform scale types
-   OnFirstWaveformScaleID,
-   OnLastWaveformScaleID = OnFirstWaveformScaleID + 9,
+   OnZoomMaxID,
 
-   // Reserve an ample block of ids for spectrum scale types
-   OnFirstSpectrumScaleID,
-   OnLastSpectrumScaleID = OnFirstSpectrumScaleID + 19,
+   OnUpOctaveID,
+   OnDownOctaveID,
 };
 ///////////////////////////////////////////////////////////////////////////////
 // Table class
 
 class NoteTrackVRulerMenuTable : public PopupMenuTable
 {
-   NoteTrackVRulerMenuTable(){};
+   NoteTrackVRulerMenuTable()
+      : PopupMenuTable{ "NoteTrackVRuler" }
+   {};
    virtual ~NoteTrackVRulerMenuTable() {}
    DECLARE_POPUP_MENU(NoteTrackVRulerMenuTable);
 
@@ -178,6 +169,22 @@ public:
    static NoteTrackVRulerMenuTable &Instance();
 
 protected:
+   enum {
+// Note that these can be with or without spectrum view which
+// adds a constant.
+//const int kZoom1to1 = 1;
+//const int kZoomTimes2 = 2;
+//const int kZoomDiv2 = 3;
+//const int kZoomHalfWave = 4;
+//const int kZoomInByDrag = 5;
+      kZoomIn = 6,
+      kZoomOut = 7,
+      kZoomReset = 8,
+      kZoomMax = 9,
+      kUpOctave = 10,
+      kDownOctave = 11,
+   };
+
    InitMenuData *mpData {};
    void OnZoom( int iZoomCode );
 // void OnZoomFitVertical(wxCommandEvent&){ OnZoom( kZoom1to1 );};
@@ -187,6 +194,9 @@ protected:
 // void OnZoomHalfWave(wxCommandEvent&){ OnZoom( kZoomHalfWave );};
    void OnZoomInVertical(wxCommandEvent&){ OnZoom( kZoomIn );};
    void OnZoomOutVertical(wxCommandEvent&){ OnZoom( kZoomOut );};
+   void OnZoomMax(wxCommandEvent&){ OnZoom( kZoomMax );};
+   void OnUpOctave(wxCommandEvent&){ OnZoom( kUpOctave );};
+   void OnDownOctave(wxCommandEvent&){ OnZoom( kDownOctave );};
 
 private:
    void DestroyMenu() override
@@ -194,9 +204,7 @@ private:
       mpData = nullptr;
    }
 
-   virtual void InitMenu(Menu *pMenu, void *pUserData) override;
-
-   void OnWaveformScaleType(wxCommandEvent &evt);
+   void InitUserData(void *pUserData) override;
 };
 
 NoteTrackVRulerMenuTable &NoteTrackVRulerMenuTable::Instance()
@@ -205,7 +213,7 @@ NoteTrackVRulerMenuTable &NoteTrackVRulerMenuTable::Instance()
    return instance;
 }
 
-void NoteTrackVRulerMenuTable::InitMenu(Menu *WXUNUSED(pMenu), void *pUserData)
+void NoteTrackVRulerMenuTable::InitUserData(void *pUserData)
 {
    mpData = static_cast<InitMenuData*>(pUserData);
 }
@@ -213,8 +221,7 @@ void NoteTrackVRulerMenuTable::InitMenu(Menu *WXUNUSED(pMenu), void *pUserData)
 void NoteTrackVRulerMenuTable::OnZoom( int iZoomCode ){
    switch( iZoomCode ){
    case kZoomReset:
-      mpData->pTrack->SetBottomNote(0);
-      mpData->pTrack->SetPitchHeight(mpData->rect.height, 1);
+      mpData->pTrack->ZoomAllNotes();
       break;
    case kZoomIn:
       mpData->pTrack->ZoomIn(mpData->rect, mpData->yy);
@@ -222,18 +229,43 @@ void NoteTrackVRulerMenuTable::OnZoom( int iZoomCode ){
    case kZoomOut:
       mpData->pTrack->ZoomOut(mpData->rect, mpData->yy);
       break;
-
+   case kZoomMax:
+      mpData->pTrack->ZoomMaxExtent();
+      break;
+   case kUpOctave:
+      mpData->pTrack->ShiftNoteRange(12);
+      break;
+   case kDownOctave:
+      mpData->pTrack->ShiftNoteRange(-12);
+      break;
    }
+   AudacityProject *const project = &mpData->project;
+   ProjectHistory::Get( *project ).ModifyState(false);
+   using namespace RefreshCode;
+   mpData->result = UpdateVRuler | RefreshAll;
 }
 
 
 BEGIN_POPUP_MENU(NoteTrackVRulerMenuTable)
 
-   POPUP_MENU_ITEM(OnZoomResetID,      _("Zoom Reset\tShift-Right-Click"), OnZoomReset)
+   BeginSection( "Zoom" );
+      BeginSection( "Basic" );
+         AppendItem( "Reset", OnZoomResetID,      XO("Zoom Reset\tShift-Right-Click"), POPUP_MENU_FN( OnZoomReset ) );
+         AppendItem( "Max", OnZoomMaxID,        XO("Max Zoom"), POPUP_MENU_FN( OnZoomMax ) );
+      EndSection();
 
-   POPUP_MENU_SEPARATOR()
-   POPUP_MENU_ITEM(OnZoomInVerticalID,  _("Zoom In\tLeft-Click/Left-Drag"),  OnZoomInVertical)
-   POPUP_MENU_ITEM(OnZoomOutVerticalID, _("Zoom Out\tShift-Left-Click"),     OnZoomOutVertical)
+      BeginSection( "InOut" );
+         AppendItem( "In", OnZoomInVerticalID,  XO("Zoom In\tLeft-Click/Left-Drag"),  POPUP_MENU_FN( OnZoomInVertical ) );
+         AppendItem( "Out", OnZoomOutVerticalID, XO("Zoom Out\tShift-Left-Click"),     POPUP_MENU_FN( OnZoomOutVertical ) );
+      EndSection();
+   EndSection();
+
+   BeginSection( "Pan" );
+      BeginSection( "Octaves" );
+         AppendItem( "Up", OnUpOctaveID,   XO("Up &Octave"),   POPUP_MENU_FN( OnUpOctave) );
+         AppendItem( "Down", OnDownOctaveID, XO("Down Octa&ve"), POPUP_MENU_FN( OnDownOctave ) );
+      EndSection();
+   EndSection();
 
 END_POPUP_MENU()
 
@@ -244,7 +276,7 @@ UIHandle::Result NoteTrackVZoomHandle::Release
  wxWindow *pParent)
 {
    using namespace RefreshCode;
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto pTrack = TrackList::Get( *pProject ).Lock(mpTrack);
    if (!pTrack)
       return RefreshNone;
 
@@ -262,13 +294,12 @@ UIHandle::Result NoteTrackVZoomHandle::Release
        !(event.ShiftDown() || event.CmdDown()))
    {
       InitMenuData data {
-         pTrack.get(), mRect, RefreshCode::RefreshNone, event.m_y
+         *pProject, pTrack.get(), mRect, RefreshNone, event.m_y
       };
 
       PopupMenuTable *const pTable =
           (PopupMenuTable *) &NoteTrackVRulerMenuTable::Instance();
-      std::unique_ptr<PopupMenuTable::Menu>
-         pMenu(PopupMenuTable::BuildMenu(pParent, pTable, &data));
+      auto pMenu = PopupMenuTable::BuildMenu(pParent, pTable, &data);
 
       // Accelerators only if zooming enabled.
       if( !bVZoom )
@@ -298,9 +329,15 @@ UIHandle::Result NoteTrackVZoomHandle::Release
    }
    else if (event.ShiftDown() || event.RightUp()) {
       if (event.ShiftDown() && event.RightUp()) {
-         // Zoom out completely
-         pTrack->SetBottomNote(0);
-         pTrack->SetPitchHeight(evt.rect.height, 1);
+         auto oldBotNote = pTrack->GetBottomNote();
+         auto oldTopNote = pTrack->GetTopNote();
+         // Zoom out to show all notes
+         pTrack->ZoomAllNotes();
+         if (pTrack->GetBottomNote() == oldBotNote &&
+               pTrack->GetTopNote() == oldTopNote) {
+            // However if we are already showing all notes, zoom out further
+            pTrack->ZoomMaxExtent();
+         }
       } else {
          // Zoom out
          pTrack->ZoomOut(evt.rect, mZoomEnd);
@@ -311,7 +348,7 @@ UIHandle::Result NoteTrackVZoomHandle::Release
    }
 
    mZoomEnd = mZoomStart = 0;
-   pProject->ModifyState(true);
+   ProjectHistory::Get( *pProject ).ModifyState(false);
 
    return RefreshAll;
 }
@@ -323,16 +360,28 @@ UIHandle::Result NoteTrackVZoomHandle::Cancel(AudacityProject *WXUNUSED(pProject
    return RefreshCode::RefreshAll;
 }
 
-void NoteTrackVZoomHandle::DrawExtras
-(DrawingPass pass, wxDC * dc, const wxRegion &, const wxRect &panelRect)
+void NoteTrackVZoomHandle::Draw(
+   TrackPanelDrawingContext &context,
+   const wxRect &rect, unsigned iPass )
 {
-   if (!mpTrack.lock()) //? TrackList::Lock()
-      return;
+   if ( iPass == TrackArtist::PassZooming ) {
+      if (!mpTrack.lock()) //? TrackList::Lock()
+         return;
+      
+      if ( IsDragZooming( mZoomStart, mZoomEnd ) )
+         TrackVRulerControls::DrawZooming
+            ( context, rect, mZoomStart, mZoomEnd );
+   }
+}
 
-   if ( pass == UIHandle::Cells &&
-        IsDragZooming( mZoomStart, mZoomEnd ) )
-      TrackVRulerControls::DrawZooming
-         ( dc, mRect, panelRect, mZoomStart, mZoomEnd );
+wxRect NoteTrackVZoomHandle::DrawingArea(
+   TrackPanelDrawingContext &,
+   const wxRect &rect, const wxRect &panelRect, unsigned iPass )
+{
+   if ( iPass == TrackArtist::PassZooming )
+      return TrackVRulerControls::ZoomingArea( rect, panelRect );
+   else
+      return rect;
 }
 
 #endif

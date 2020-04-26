@@ -12,11 +12,10 @@
 #define __AUDACITY_TimeDialog__
 
 #include <wx/defs.h>
-#include <wx/event.h>
-#include <wx/string.h>
 
-#include "widgets/wxPanelWrapper.h"
-#include "Internat.h"
+#include "audacity/ComponentInterface.h" // member variable
+
+#include "widgets/wxPanelWrapper.h" // to inherit
 
 class NumericTextCtrl;
 class ShuttleGui;
@@ -26,13 +25,13 @@ class TimeDialog final : public wxDialogWrapper
  public:
 
    TimeDialog(wxWindow *parent,
-              const wxString &title,
-              const NumericFormatId &format,
+              const TranslatableString &title,
+              const NumericFormatSymbol &format,
               double rate,
               double time,
-              const wxString &prompt = _("Duration"));
+              const TranslatableString &prompt = XO("Duration"));
 
-   void SetFormatString(const NumericFormatId &formatString);
+   void SetFormatString(const NumericFormatSymbol &formatString);
    void SetSampleRate(double sampleRate);
    void SetTimeValue(double newTime);
    const double GetTimeValue();
@@ -47,8 +46,8 @@ class TimeDialog final : public wxDialogWrapper
 
  private:
 
-   wxString mPrompt;
-   NumericFormatId mFormat;
+   TranslatableString mPrompt;
+   NumericFormatSymbol mFormat;
    double mRate;
    double mTime;
 

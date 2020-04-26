@@ -10,7 +10,7 @@
 #define __AUDACITY_FILE_EXCEPTION__
 
 #include "AudacityException.h"
-#include <wx/filename.h>
+#include <wx/filename.h> // wxFileName member variable
 
 class FileException /* not final */ : public MessageBoxException
 {
@@ -19,7 +19,7 @@ public:
 
    explicit FileException
       ( Cause cause_, const wxFileName &fileName_,
-        const wxString &caption = _("File Error"),
+        const TranslatableString &caption = XO("File Error"),
         const wxFileName &renameTarget_ = {})
    : MessageBoxException{ caption }
    , cause{ cause_ }, fileName{ fileName_ }, renameTarget{ renameTarget_ }
@@ -37,10 +37,8 @@ public:
    ~FileException() override;
 
 protected:
-   std::unique_ptr< AudacityException > Move() override;
-
    // Format a default, internationalized error message for this exception.
-   wxString ErrorMessage() const override;
+   TranslatableString ErrorMessage() const override;
 
 public:
    Cause cause;

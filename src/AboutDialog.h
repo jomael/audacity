@@ -11,44 +11,20 @@
 #ifndef __AUDACITY_ABOUT_DLG__
 #define __AUDACITY_ABOUT_DLG__
 
-#include "MemoryX.h"
 #include <vector>
-#include <wx/sizer.h>
-#include <wx/statbmp.h>
-#include <wx/bitmap.h>
-#include "widgets/wxPanelWrapper.h"
+#include "widgets/wxPanelWrapper.h" // to inherit
 
-extern const wxString VerCheckArgs();
-extern const wxString VerCheckUrl();
-extern const wxString VerCheckHtml();
+class wxStaticBitmap;
+class wxTextOutputStream;
 
 class ShuttleGui;
 
 struct AboutDialogCreditItem {
-   wxString description;
-   int role;
-
-   AboutDialogCreditItem(wxString &&description_, int role_)
-      : description(description_), role(role_)
+   AboutDialogCreditItem( TranslatableString str, int r )
+      : description{ std::move( str ) }, role{ r }
    {}
-
-#ifdef __AUDACITY_OLD_STD__
-   AboutDialogCreditItem(const AboutDialogCreditItem&) = default;
-   AboutDialogCreditItem& operator= (const AboutDialogCreditItem&) = default;
-#else
-   // No copy, use the move
-   AboutDialogCreditItem(const AboutDialogCreditItem&) PROHIBITED;
-   AboutDialogCreditItem& operator= (const AboutDialogCreditItem&) PROHIBITED;
-#endif
-
-   // Move constructor, because wxString lacks one
-   AboutDialogCreditItem(AboutDialogCreditItem &&moveMe)
-      : role(moveMe.role)
-   {
-      description.swap(moveMe.description);
-   }
-
-   ~AboutDialogCreditItem() {}
+   TranslatableString description;
+   int role;
 };
 
 using AboutDialogCreditItemsList = std::vector<AboutDialogCreditItem>;
@@ -74,6 +50,7 @@ class AboutDialog final : public wxDialogWrapper {
       roleEmeritusTeam,
       roleDeceased,
       roleContributor,
+      roleGraphics,
       roleLibrary,
       roleThanks
    };
@@ -84,11 +61,14 @@ class AboutDialog final : public wxDialogWrapper {
    void PopulateInformationPage (ShuttleGui & S );
 
    void CreateCreditsList();
-   void AddCredit(wxString &&description, Role role);
+   void AddCredit( const wxString &name, Role role );
+   void AddCredit( const wxString &name, TranslatableString format, Role role );
    wxString GetCreditsByRole(AboutDialog::Role role);
 
-   void AddBuildinfoRow( wxString* htmlstring, const wxChar * libname, const wxChar * libdesc, const wxString &status);
-   void AddBuildinfoRow( wxString* htmlstring, const wxChar * libname, const wxChar * libdesc);
+   void AddBuildinfoRow( wxTextOutputStream *str, const wxChar * libname,
+      const TranslatableString &libdesc, const wxString &status);
+   void AddBuildinfoRow( wxTextOutputStream *str,
+      const TranslatableString &description, const wxChar *spec);
 };
 
 #endif

@@ -14,6 +14,7 @@
 #include "expat.h"
 
 #include "XMLTagHandler.h"
+#include "Internat.h" // for TranslatableString
 
 class AUDACITY_DLL_API XMLFileReader final {
  public:
@@ -21,9 +22,10 @@ class AUDACITY_DLL_API XMLFileReader final {
    ~XMLFileReader();
 
    bool Parse(XMLTagHandler *baseHandler,
-              const wxString &fname);
+              const FilePath &fname);
 
-   wxString GetErrorStr();
+   const TranslatableString &GetErrorStr() const;
+   const TranslatableString &GetLibraryErrorStr() const;
 
    // Callback functions for expat
 
@@ -39,5 +41,6 @@ class AUDACITY_DLL_API XMLFileReader final {
    XMLTagHandler   *mBaseHandler;
    using Handlers = std::vector<XMLTagHandler*>;
    Handlers mHandler;
-   wxString         mErrorStr;
+   TranslatableString mErrorStr;
+   TranslatableString mLibraryErrorStr;
 };

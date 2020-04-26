@@ -11,33 +11,27 @@
 #ifndef __AUDACITY_EFFECT_AUTODUCK__
 #define __AUDACITY_EFFECT_AUTODUCK__
 
-#include <wx/bitmap.h>
-#include <wx/event.h>
-#include <wx/gdicmn.h>
-#include <wx/string.h>
-#include <wx/textctrl.h>
-#include <wx/window.h>
-
 #include "Effect.h"
-#include "../widgets/wxPanelWrapper.h"
 
+class wxBitmap;
+class wxTextCtrl;
 class EffectAutoDuckPanel;
 class ShuttleGui;
 
 #define AUTO_DUCK_PANEL_NUM_CONTROL_POINTS 5
 
-#define AUTODUCK_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Auto Duck") }
-
 class EffectAutoDuck final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectAutoDuck();
    virtual ~EffectAutoDuck();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
    wxString ManualPage() override;
 
    // EffectDefinitionInterface implementation

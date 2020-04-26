@@ -26,79 +26,15 @@
 *//**********************************************************************/
 
 #include "Audacity.h"
+#include "WrappedType.h"
+
 #include <wx/wxprec.h>
 #include "Internat.h"
-#include "WrappedType.h"
 
 /// @return true iff the wrapped type is a string.
 bool WrappedType::IsString()
 {
    return eWrappedType == eWrappedString;
-}
-
-/// @param W Wrapped type to compare
-/// @return true iff types and values are the same.
-bool WrappedType::ValuesMatch( const WrappedType & W )
-{
-   if( W.eWrappedType != eWrappedType )
-      return false;
-   switch( eWrappedType )
-   {
-   case eWrappedString:
-      return *W.mpStr == *mpStr;
-      break;
-   case eWrappedInt:
-      return *W.mpInt == *mpInt;
-      break;
-   case eWrappedDouble:
-      return *W.mpDouble == *mpDouble;
-      break;
-   case eWrappedBool:
-      return *W.mpBool == *mpBool;
-      break;
-   case eWrappedEnum:
-      wxASSERT( false );
-      break;
-   default:
-      wxASSERT( false );
-      break;
-   }
-   return false;
-}
-
-void WrappedType::Init()
-{
-   eWrappedType = eWrappedNotSet;
-   mpStr = NULL;
-   mpInt = NULL;
-   mpDouble = NULL;
-   mpBool = NULL;
-}
-
-void WrappedType::WriteToAsWrappedType( const WrappedType & W )
-{
-   wxASSERT( W.eWrappedType == eWrappedType );
-   switch( eWrappedType )
-   {
-   case eWrappedString:
-      *mpStr = *W.mpStr;
-      break;
-   case eWrappedInt:
-      *mpInt = *W.mpInt;
-      break;
-   case eWrappedDouble:
-      *mpDouble = *W.mpDouble;
-      break;
-   case eWrappedBool:
-      *mpBool = *W.mpBool;
-      break;
-   case eWrappedEnum:
-      wxASSERT( false );
-      break;
-   default:
-      wxASSERT( false );
-      break;
-   }
 }
 
 
@@ -114,7 +50,7 @@ wxString WrappedType::ReadAsString()
       return wxString::Format(wxT("%i"),*mpInt );
       break;
    case eWrappedDouble:
-      return wxString::Format(wxT("%g"),*mpDouble );
+      return wxString::Format(wxT("%.8g"),*mpDouble );
       break;
    case eWrappedBool:
       return (* mpBool) ? wxT("true") : wxT("false" );
@@ -272,7 +208,7 @@ void WrappedType::WriteToAsDouble( const double InDouble)
    switch( eWrappedType )
    {
    case eWrappedString:
-      *mpStr = wxString::Format( wxT("%g"), InDouble );
+      *mpStr = wxString::Format( wxT("%.8g"), InDouble );
       break;
    case eWrappedInt:
       *mpInt = (int)InDouble;

@@ -17,28 +17,44 @@ handling.
 *//*******************************************************************/
 
 #include "../Audacity.h"
+#include "ProjectsPrefs.h"
+
+#include "../Experimental.h"
 
 #include <wx/defs.h>
 #include <wx/textctrl.h>
 
+#include "../FileFormats.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
-
-#include "ProjectsPrefs.h"
-#include "../Internat.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
 ProjectsPrefs::ProjectsPrefs(wxWindow * parent, wxWindowID winid)
 :   PrefsPanel(parent, winid,
    /* i18n-hint: (noun) i.e Audacity projects. */
-               _("Projects"))
+               XO("Projects"))
 {
    Populate();
 }
 
 ProjectsPrefs::~ProjectsPrefs()
 {
+}
+
+ComponentInterfaceSymbol ProjectsPrefs::GetSymbol()
+{
+   return PROJECTS_PREFS_PLUGIN_SYMBOL;
+}
+
+TranslatableString ProjectsPrefs::GetDescription()
+{
+   return XO("Preferences for Projects");
+}
+
+wxString ProjectsPrefs::HelpPageName()
+{
+   return "Projects_Preferences";
 }
 
 /// Creates the dialog and its contents.
@@ -58,16 +74,13 @@ void ProjectsPrefs::PopulateOrExchange(ShuttleGui & S)
    S.SetBorder(2);
    S.StartScroller();
 
-   S.StartStatic(_("When saving a project that depends on other audio files"));
+   S.StartStatic(XO("When saving a project that depends on other audio files"));
    {
-      S.StartRadioButtonGroup(wxT("/FileFormats/SaveProjectWithDependencies"), wxT("ask"));
+      S.StartRadioButtonGroup(FileFormatsSaveWithDependenciesSetting);
       {
-         S.TieRadioButton(_("&Copy all audio into project (safest)"),
-                          wxT("copy"));
-         S.TieRadioButton(_("Do &not copy any audio"),
-                          wxT("never"));
-         S.TieRadioButton(_("As&k"),
-                          wxT("ask"));
+         S.TieRadioButton();
+         S.TieRadioButton();
+         S.TieRadioButton();
       }
       S.EndRadioButtonGroup();
    }
@@ -84,13 +97,18 @@ bool ProjectsPrefs::Commit()
    return true;
 }
 
-wxString ProjectsPrefs::HelpPageName()
-{
-   return "Projects_Preferences";
+#ifdef EXPERIMENTAL_OD_DATA
+namespace{
+PrefsPanel::Registration sAttachment{ "Projects",
+   [](wxWindow *parent, wxWindowID winid, AudacityProject *)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew ProjectsPrefs(parent, winid);
+   },
+   false,
+   // Register with an explicit ordering hint because this one is
+   // only conditionally compiled
+   { "", { Registry::OrderingHint::After, "ImportExport" } }
+};
 }
-
-PrefsPanel *ProjectsPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew ProjectsPrefs(parent, winid);
-}
+#endif

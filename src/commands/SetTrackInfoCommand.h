@@ -20,11 +20,6 @@
 #include "Command.h"
 #include "CommandType.h"
 
-#define SET_TRACK_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Set Track") }
-#define SET_TRACK_STATUS_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Set Track Status") }
-#define SET_TRACK_AUDIO_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Set Track Audio") }
-#define SET_TRACK_VISUALS_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Set Track Visuals") }
-
 class Track;
 
 class SetTrackBase : public AudacityCommand
@@ -49,15 +44,17 @@ public:
 class SetTrackStatusCommand : public SetTrackBase
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    //SetTrackStatusCommand();
-   // CommandDefinitionInterface overrides
-   IdentInterfaceSymbol GetSymbol() override {return SET_TRACK_STATUS_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets various values for a track.");};
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Sets various values for a track.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Tools#set_track_status");};
+   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#set_track_status");};
    bool ApplyInner( const CommandContext & context, Track * t ) override;
 
 public:
@@ -74,15 +71,17 @@ public:
 class SetTrackAudioCommand : public SetTrackBase
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    //SetTrackAudioCommand();
-   // CommandDefinitionInterface overrides
-   IdentInterfaceSymbol GetSymbol() override {return SET_TRACK_AUDIO_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets various values for a track.");};
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Sets various values for a track.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Tools#set_track");};
+   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#set_track_audio");};
    bool ApplyInner( const CommandContext & context, Track * t ) override;
 
 public:
@@ -101,15 +100,17 @@ public:
 class SetTrackVisualsCommand : public SetTrackBase
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    //SetTrackVisualsCommand();
-   // CommandDefinitionInterface overrides
-   IdentInterfaceSymbol GetSymbol() override {return SET_TRACK_VISUALS_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets various values for a track.");};
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Sets various values for a track.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Tools#set_track");};
+   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#set_track_visuals");};
    bool ApplyInner( const CommandContext & context, Track * t ) override;
 
 public:
@@ -118,6 +119,8 @@ public:
    int mDisplayType;
    int mScaleType;
    int mVZoom;
+   double mVZoomTop;
+   double mVZoomBottom;
 
    bool bUseSpecPrefs;
    bool bSpectralSelect;
@@ -129,6 +132,8 @@ public:
    bool bHasDisplayType;
    bool bHasScaleType;
    bool bHasVZoom;
+   bool bHasVZoomTop;
+   bool bHasVZoomBottom;
 
    bool bHasUseSpecPrefs;
    bool bHasSpectralSelect;
@@ -138,12 +143,14 @@ public:
 class SetTrackCommand : public SetTrackBase
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    SetTrackCommand();
-   // CommandDefinitionInterface overrides
-   IdentInterfaceSymbol GetSymbol() override {return SET_TRACK_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets various values for a track.");};
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Sets various values for a track.");};
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Tools#set_track");};
+   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_II#set_track");};
 
 public:
 

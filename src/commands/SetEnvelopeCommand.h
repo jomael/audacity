@@ -16,24 +16,22 @@
 #ifndef __SET_ENVELOPE_COMMAND__
 #define __SET_ENVELOPE_COMMAND__
 
-#include "Command.h"
-#include "CommandType.h"
 #include "SetTrackInfoCommand.h"
-
-#define SET_ENVELOPE_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Set Envelope") }
 
 class SetEnvelopeCommand : public SetTrackBase
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    SetEnvelopeCommand();
-   // CommandDefinitionInterface overrides
-   IdentInterfaceSymbol GetSymbol() override {return SET_ENVELOPE_PLUGIN_SYMBOL;};
-   wxString GetDescription() override {return _("Sets an envelope point position.");};
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() override {return Symbol;};
+   TranslatableString GetDescription() override {return XO("Sets an envelope point position.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
    // AudacityCommand overrides
-   wxString ManualPage() override {return wxT("Extra_Menu:_Tools#set_label");};
+   wxString ManualPage() override {return wxT("Extra_Menu:_Scriptables_I#set_envelope");};
    bool ApplyInner( const CommandContext & context, Track * t ) override;
 
 public:

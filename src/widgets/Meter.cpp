@@ -38,15 +38,20 @@
 
 *//******************************************************************/
 
-#include "../Audacity.h"
+#include "../Audacity.h" // for USE_* macros
 #include "Meter.h"
 
+#include "../Experimental.h"
+
 #include <algorithm>
+#include <wx/setup.h> // for wxUSE_* macros
+#include <wx/wxcrtvararg.h>
 #include <wx/app.h>
 #include <wx/defs.h>
 #include <wx/dialog.h>
 #include <wx/dcbuffer.h>
 #include <wx/dcmemory.h>
+#include <wx/frame.h>
 #include <wx/image.h>
 #include <wx/intl.h>
 #include <wx/menu.h>
@@ -63,20 +68,96 @@
 #include "../ImageManipulation.h"
 #include "../prefs/GUISettings.h"
 #include "../Project.h"
-#include "../toolbars/MeterToolBar.h"
-#include "../toolbars/ControlToolBar.h"
+#include "../ProjectAudioManager.h"
+#include "../ProjectStatus.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 
-#include "../Theme.h"
 #include "../AllThemeResources.h"
-#include "../Experimental.h"
 #include "../widgets/valnum.h"
+
+#if wxUSE_ACCESSIBILITY
+#include "WindowAccessible.h"
+
+class MeterAx final : public WindowAccessible
+{
+public:
+   MeterAx(wxWindow * window);
+
+   virtual ~ MeterAx();
+
+   // Performs the default action. childId is 0 (the action for this object)
+   // or > 0 (the action for a child).
+   // Return wxACC_NOT_SUPPORTED if there is no default action for this
+   // window (e.g. an edit control).
+   wxAccStatus DoDefaultAction(int childId) override;
+
+   // Retrieves the address of an IDispatch interface for the specified child.
+   // All objects must support this property.
+   wxAccStatus GetChild(int childId, wxAccessible** child) override;
+
+   // Gets the number of children.
+   wxAccStatus GetChildCount(int* childCount) override;
+
+   // Gets the default action for this object (0) or > 0 (the action for a child).
+   // Return wxACC_OK even if there is no action. actionName is the action, or the empty
+   // string if there is no action.
+   // The retrieved string describes the action that is performed on an object,
+   // not what the object does as a result. For example, a toolbar button that prints
+   // a document has a default action of "Press" rather than "Prints the current document."
+   wxAccStatus GetDefaultAction(int childId, wxString *actionName) override;
+
+   // Returns the description for this object or a child.
+   wxAccStatus GetDescription(int childId, wxString *description) override;
+
+   // Gets the window with the keyboard focus.
+   // If childId is 0 and child is NULL, no object in
+   // this subhierarchy has the focus.
+   // If this object has the focus, child should be 'this'.
+   wxAccStatus GetFocus(int *childId, wxAccessible **child) override;
+
+   // Returns help text for this object or a child, similar to tooltip text.
+   wxAccStatus GetHelpText(int childId, wxString *helpText) override;
+
+   // Returns the keyboard shortcut for this object or child.
+   // Return e.g. ALT+K
+   wxAccStatus GetKeyboardShortcut(int childId, wxString *shortcut) override;
+
+   // Returns the rectangle for this object (id = 0) or a child element (id > 0).
+   // rect is in screen coordinates.
+   wxAccStatus GetLocation(wxRect& rect, int elementId) override;
+
+   // Gets the name of the specified object.
+   wxAccStatus GetName(int childId, wxString *name) override;
+
+   // Returns a role constant.
+   wxAccStatus GetRole(int childId, wxAccRole *role) override;
+
+   // Gets a variant representing the selected children
+   // of this object.
+   // Acceptable values:
+   // - a null variant (IsNull() returns TRUE)
+   // - a list variant (GetType() == wxT("list"))
+   // - an integer representing the selected child element,
+   //   or 0 if this object is selected (GetType() == wxT("long"))
+   // - a "void*" pointer to a wxAccessible child object
+   wxAccStatus GetSelections(wxVariant *selections) override;
+
+   // Returns a state constant.
+   wxAccStatus GetState(int childId, long* state) override;
+
+   // Returns a localized string representing the value for the object
+   // or child.
+   wxAccStatus GetValue(int childId, wxString* strValue) override;
+
+};
+
+#endif // wxUSE_ACCESSIBILITY
 
 static const long MIN_REFRESH_RATE = 1;
 static const long MAX_REFRESH_RATE = 100;
 
-/* Updates to the meter are passed accross via meter updates, each contained in
+/* Updates to the meter are passed across via meter updates, each contained in
  * a MeterUpdateMsg object */
 wxString MeterUpdateMsg::toString()
 {
@@ -175,9 +256,6 @@ bool MeterUpdateQueue::Get(MeterUpdateMsg &msg)
 // How many pixels between items?
 const static int gap = 2;
 
-// Event used to notify all meters of preference changes
-wxDEFINE_EVENT(EVT_METER_PREFERENCES_CHANGED, wxCommandEvent);
-
 const static wxChar *PrefStyles[] =
 {
    wxT("AutomaticStereo"),
@@ -191,7 +269,7 @@ enum {
    OnPreferencesID
 };
 
-BEGIN_EVENT_TABLE(MeterPanel, wxPanelWrapper)
+BEGIN_EVENT_TABLE(MeterPanel, MeterPanelBase)
    EVT_TIMER(OnMeterUpdateID, MeterPanel::OnMeterUpdate)
    EVT_MOUSE_EVENTS(MeterPanel::OnMouse)
    EVT_CONTEXT_MENU(MeterPanel::OnContext)
@@ -215,7 +293,7 @@ MeterPanel::MeterPanel(AudacityProject *project,
              const wxSize& size /*= wxDefaultSize*/,
              Style style /*= HorizontalStereo*/,
              float fDecayRate /*= 60.0f*/)
-: wxPanelWrapper(parent, id, pos, size, wxTAB_TRAVERSAL | wxNO_BORDER | wxWANTS_CHARS),
+: MeterPanelBase(parent, id, pos, size, wxTAB_TRAVERSAL | wxNO_BORDER | wxWANTS_CHARS),
    mProject(project),
    mQueue(1024),
    mWidth(size.x),
@@ -241,7 +319,7 @@ MeterPanel::MeterPanel(AudacityProject *project,
    mAccSilent(false)
 {
    // i18n-hint: Noun (the meter is used for playback or record level monitoring)
-   SetName( _("Meter") );
+   SetName( XO("Meter") );
    // Suppress warnings about the header file
    wxUnusedVar(SpeakerMenu_xpm);
    wxUnusedVar(MicMenu_xpm);
@@ -264,16 +342,11 @@ MeterPanel::MeterPanel(AudacityProject *project,
    UpdatePrefs();
 
    wxColour backgroundColour = theTheme.Colour( clrMedium);
-   mBkgndBrush = wxBrush(backgroundColour, wxSOLID);
+   mBkgndBrush = wxBrush(backgroundColour, wxBRUSHSTYLE_SOLID);
    SetBackgroundColour( backgroundColour );
-
-   mPeakPeakPen = wxPen(theTheme.Colour( clrMeterPeak),        1, wxSOLID);
-   mDisabledPen = wxPen(theTheme.Colour( clrMeterDisabledPen), 1, wxSOLID);
-
-   // Register for our preference update event
-   wxTheApp->Bind(EVT_METER_PREFERENCES_CHANGED,
-                     &MeterPanel::OnMeterPrefsUpdated,
-                     this);
+   
+   mPeakPeakPen = wxPen(theTheme.Colour( clrMeterPeak),        1, wxPENSTYLE_SOLID);
+   mDisabledPen = wxPen(theTheme.Colour( clrMeterDisabledPen), 1, wxPENSTYLE_SOLID);
 
    if (mIsInput) {
       wxTheApp->Bind(EVT_AUDIOIO_MONITOR,
@@ -283,10 +356,10 @@ MeterPanel::MeterPanel(AudacityProject *project,
                         &MeterPanel::OnAudioIOStatus,
                         this);
 
-      mPen       = wxPen(   theTheme.Colour( clrMeterInputPen         ), 1, wxSOLID);
-      mBrush     = wxBrush( theTheme.Colour( clrMeterInputBrush       ), wxSOLID);
-      mRMSBrush  = wxBrush( theTheme.Colour( clrMeterInputRMSBrush    ), wxSOLID);
-      mClipBrush = wxBrush( theTheme.Colour( clrMeterInputClipBrush   ), wxSOLID);
+      mPen       = wxPen(   theTheme.Colour( clrMeterInputPen         ), 1, wxPENSTYLE_SOLID);
+      mBrush     = wxBrush( theTheme.Colour( clrMeterInputBrush       ), wxBRUSHSTYLE_SOLID);
+      mRMSBrush  = wxBrush( theTheme.Colour( clrMeterInputRMSBrush    ), wxBRUSHSTYLE_SOLID);
+      mClipBrush = wxBrush( theTheme.Colour( clrMeterInputClipBrush   ), wxBRUSHSTYLE_SOLID);
 //      mLightPen  = wxPen(   theTheme.Colour( clrMeterInputLightPen    ), 1, wxSOLID);
 //      mDarkPen   = wxPen(   theTheme.Colour( clrMeterInputDarkPen     ), 1, wxSOLID);
    }
@@ -296,10 +369,10 @@ MeterPanel::MeterPanel(AudacityProject *project,
                         &MeterPanel::OnAudioIOStatus,
                         this);
 
-      mPen       = wxPen(   theTheme.Colour( clrMeterOutputPen        ), 1, wxSOLID);
-      mBrush     = wxBrush( theTheme.Colour( clrMeterOutputBrush      ), wxSOLID);
-      mRMSBrush  = wxBrush( theTheme.Colour( clrMeterOutputRMSBrush   ), wxSOLID);
-      mClipBrush = wxBrush( theTheme.Colour( clrMeterOutputClipBrush  ), wxSOLID);
+      mPen       = wxPen(   theTheme.Colour( clrMeterOutputPen        ), 1, wxPENSTYLE_SOLID);
+      mBrush     = wxBrush( theTheme.Colour( clrMeterOutputBrush      ), wxBRUSHSTYLE_SOLID);
+      mRMSBrush  = wxBrush( theTheme.Colour( clrMeterOutputRMSBrush   ), wxBRUSHSTYLE_SOLID);
+      mClipBrush = wxBrush( theTheme.Colour( clrMeterOutputClipBrush  ), wxBRUSHSTYLE_SOLID);
 //      mLightPen  = wxPen(   theTheme.Colour( clrMeterOutputLightPen   ), 1, wxSOLID);
 //      mDarkPen   = wxPen(   theTheme.Colour( clrMeterOutputDarkPen    ), 1, wxSOLID);
    }
@@ -379,6 +452,20 @@ void MeterPanel::UpdatePrefs()
    Reset(mRate, false);
 
    mLayoutValid = false;
+
+   Refresh(false);
+}
+
+static int MeterPrefsID()
+{
+   static int value = wxNewId();
+   return value;
+}
+
+void MeterPanel::UpdateSelectedPrefs(int id)
+{
+   if (id == MeterPrefsID())
+      UpdatePrefs();
 }
 
 void MeterPanel::OnErase(wxEraseEvent & WXUNUSED(event))
@@ -523,13 +610,13 @@ void MeterPanel::OnPaint(wxPaintEvent & WXUNUSED(event))
                {
                   // 2 pixel spacing between the LEDs
                   if( (i%7)<2 ){
-                     dc.DrawLine( i+r.x, r.y, i+r.x, r.y+r.height );
+                     AColor::Line( dc, i+r.x, r.y, i+r.x, r.y+r.height );
                   } else {
                      // The LEDs have triangular ends.  
                      // This code shapes the ends.
                      int j = abs( (i%7)-4);
-                     dc.DrawLine( i+r.x, r.y, i+r.x, r.y+j +1);
-                     dc.DrawLine( i+r.x, r.y+r.height-j, i+r.x, r.y+r.height );
+                     AColor::Line( dc, i+r.x, r.y, i+r.x, r.y+j +1);
+                     AColor::Line( dc, i+r.x, r.y+r.height-j, i+r.x, r.y+r.height );
                   }
                }
             }
@@ -579,14 +666,15 @@ void MeterPanel::OnPaint(wxPaintEvent & WXUNUSED(event))
    if( mIsInput && !mActive )
    {
       destDC.SetFont( GetFont() );
-      wxArrayString texts;
 
-      texts.Add( _("Click to Start Monitoring") );
-      texts.Add( _("Click for Monitoring") );
-      texts.Add( _("Click to Start") );
-      texts.Add( _("Click") );
+      wxArrayStringEx texts{
+         _("Click to Start Monitoring") ,
+         _("Click for Monitoring") ,
+         _("Click to Start") ,
+         _("Click") ,
+      };
 
-      for( size_t i = 0, cnt = texts.GetCount(); i < cnt; i++ )
+      for( size_t i = 0, cnt = texts.size(); i < cnt; i++ )
       {
          wxString Text = wxT(" ") + texts[i] + wxT(" ");
          wxSize Siz = destDC.GetTextExtent( Text );
@@ -670,14 +758,14 @@ void MeterPanel::OnMouse(wxMouseEvent &evt)
 
   #if wxUSE_TOOLTIPS // Not available in wxX11
    if (evt.Leaving()){
-      GetActiveProject()->TP_DisplayStatusMessage(wxT(""));
+      ProjectStatus::Get( *mProject ).Set({});
    }
    else if (evt.Entering()) {
       // Display the tooltip in the status bar
       wxToolTip * pTip = this->GetToolTip();
       if( pTip ) {
-         wxString tipText = pTip->GetTip();
-         GetActiveProject()->TP_DisplayStatusMessage(tipText);
+         auto tipText = Verbatim( pTip->GetTip() );
+         ProjectStatus::Get( *mProject ).Set(tipText);
       }
    }
   #endif
@@ -978,6 +1066,8 @@ void MeterPanel::OnMeterUpdate(wxTimerEvent & WXUNUSED(event))
       mQueue.Clear();
       return;
    }
+
+   auto gAudioIO = AudioIO::Get();
 
    // There may have been several update messages since the last
    // time we got to this function.  Catch up to real-time by
@@ -1649,7 +1739,7 @@ void MeterPanel::DrawMeterBar(wxDC &dc, MeterBar *bar)
          // Draw the "recent" peak hold line
          // (h - 1) corresponds to the mRuler.SetBounds() in HandleLayout()
          dc.SetPen(mPen);
-         int ht = (int)(bar->peakHold * (h - 1) + 0.5);
+         ht = (int)(bar->peakHold * (h - 1) + 0.5);
          if (ht > 0)
          {
             AColor::Line(dc, x, y + h - ht - 1, x + w - 1, y + h - ht - 1);
@@ -1779,14 +1869,15 @@ void MeterPanel::StartMonitoring()
 {
    bool start = !mMonitoring;
 
+   auto gAudioIO = AudioIO::Get();
    if (gAudioIO->IsMonitoring()){
       gAudioIO->StopStream();
    } 
 
    if (start && !gAudioIO->IsBusy()){
-      AudacityProject *p = GetActiveProject();
+      AudacityProject *p = mProject;
       if (p){
-         gAudioIO->StartMonitoring(p->GetRate());
+         gAudioIO->StartMonitoring( DefaultPlayOptions( *p ) );
       }
 
       mLayoutValid = false;
@@ -1797,6 +1888,7 @@ void MeterPanel::StartMonitoring()
 
 void MeterPanel::StopMonitoring(){
    mMonitoring = false;
+   auto gAudioIO = AudioIO::Get();
    if (gAudioIO->IsMonitoring()){
       gAudioIO->StopStream();
    } 
@@ -1885,15 +1977,6 @@ void MeterPanel::OnMonitor(wxCommandEvent & WXUNUSED(event))
    StartMonitoring();
 }
 
-void MeterPanel::OnMeterPrefsUpdated(wxCommandEvent & evt)
-{
-   evt.Skip();
-
-   UpdatePrefs();
-
-   Refresh(false);
-}
-
 void MeterPanel::OnPreferences(wxCommandEvent & WXUNUSED(event))
 {
    wxTextCtrl *rate;
@@ -1906,29 +1989,29 @@ void MeterPanel::OnPreferences(wxCommandEvent & WXUNUSED(event))
    wxRadioButton *vertical;
    int meterRefreshRate = mMeterRefreshRate;
 
-   wxString title(mIsInput ? _("Recording Meter Options") : _("Playback Meter Options"));
+   auto title = mIsInput ? XO("Recording Meter Options") : XO("Playback Meter Options");
 
    // Dialog is a child of the project, rather than of the toolbar.
    // This determines where it pops up.
 
-   wxDialogWrapper dlg(GetActiveProject(), wxID_ANY, title);
-   dlg.SetName(dlg.GetTitle());
+   wxDialogWrapper dlg( FindProjectFrame( mProject ), wxID_ANY, title);
+   dlg.SetName();
    ShuttleGui S(&dlg, eIsCreating);
    S.StartVerticalLay();
    {
-      S.StartStatic(_("Refresh Rate"), 0);
+      S.StartStatic(XO("Refresh Rate"), 0);
       {
-         S.AddFixedText(_("Higher refresh rates make the meter show more frequent\nchanges. A rate of 30 per second or less should prevent\nthe meter affecting audio quality on slower machines."));
+         S.AddFixedText(XO(
+"Higher refresh rates make the meter show more frequent\nchanges. A rate of 30 per second or less should prevent\nthe meter affecting audio quality on slower machines."));
          S.StartHorizontalLay();
          {
-            rate = S.AddTextBox(_("Meter refresh rate per second [1-100]: "),
+            rate = S.Name(XO("Meter refresh rate per second [1-100]"))
+               .Validator<IntegerValidator<long>>(
+                  &mMeterRefreshRate, NumValidatorStyle::DEFAULT,
+                  MIN_REFRESH_RATE, MAX_REFRESH_RATE)
+               .AddTextBox(XO("Meter refresh rate per second [1-100]: "),
                                 wxString::Format(wxT("%d"), meterRefreshRate),
                                 10);
-            rate->SetName(_("Meter refresh rate per second [1-100]"));
-            IntegerValidator<long> vld(&mMeterRefreshRate);
-
-            vld.SetRange(MIN_REFRESH_RATE, MAX_REFRESH_RATE);
-            rate->SetValidator(vld);
          }
          S.EndHorizontalLay();
       }
@@ -1936,53 +2019,38 @@ void MeterPanel::OnPreferences(wxCommandEvent & WXUNUSED(event))
 
       S.StartHorizontalLay();
       {
-        S.StartStatic(_("Meter Style"), 0);
+        S.StartStatic(XO("Meter Style"), 0);
         {
            S.StartVerticalLay();
            {
-              gradient = S.AddRadioButton(_("Gradient"));
-              gradient->SetName(_("Gradient"));
-              gradient->SetValue(mGradient);
-
-              rms = S.AddRadioButtonToGroup(_("RMS"));
-              rms->SetName(_("RMS"));
-              rms->SetValue(!mGradient);
+              gradient = S.AddRadioButton(XO("Gradient"), true, mGradient);
+              rms = S.AddRadioButtonToGroup(XO("RMS"), false, mGradient);
            }
            S.EndVerticalLay();
         }
         S.EndStatic();
 
-        S.StartStatic(_("Meter Type"), 0);
+        S.StartStatic(XO("Meter Type"), 0);
         {
            S.StartVerticalLay();
            {
-              db = S.AddRadioButton(_("dB"));
-              db->SetName(_("dB"));
-              db->SetValue(mDB);
-
-              linear = S.AddRadioButtonToGroup(_("Linear"));
-              linear->SetName(_("Linear"));
-              linear->SetValue(!mDB);
+              db = S.AddRadioButton(XO("dB"), true, mDB);
+              linear = S.AddRadioButtonToGroup(XO("Linear"), false, mDB);
            }
            S.EndVerticalLay();
         }
         S.EndStatic();
 
-        S.StartStatic(_("Orientation"), 1);
+        S.StartStatic(XO("Orientation"), 1);
         {
            S.StartVerticalLay();
            {
-              automatic = S.AddRadioButton(_("Automatic"));
-              automatic->SetName(_("Automatic"));
-              automatic->SetValue(mDesiredStyle == AutomaticStereo);
-
-              horizontal = S.AddRadioButtonToGroup(_("Horizontal"));
-              horizontal->SetName(_("Horizontal"));
-              horizontal->SetValue(mDesiredStyle == HorizontalStereo);
-
-              vertical = S.AddRadioButtonToGroup(_("Vertical"));
-              vertical->SetName(_("Vertical"));
-              vertical->SetValue(mDesiredStyle == VerticalStereo);
+              automatic = S.AddRadioButton(
+                  XO("Automatic"), AutomaticStereo, mDesiredStyle);
+              horizontal = S.AddRadioButtonToGroup(
+                  XO("Horizontal"), HorizontalStereo, mDesiredStyle);
+              vertical = S.AddRadioButtonToGroup(
+                  XO("Vertical"), VerticalStereo, mDesiredStyle);
            }
            S.EndVerticalLay();
         }
@@ -1999,10 +2067,11 @@ void MeterPanel::OnPreferences(wxCommandEvent & WXUNUSED(event))
 
    if (dlg.ShowModal() == wxID_OK)
    {
-      wxArrayString style;
-      style.Add(wxT("AutomaticStereo"));
-      style.Add(wxT("HorizontalStereo"));
-      style.Add(wxT("VerticalStereo"));
+      wxArrayStringEx style{
+         wxT("AutomaticStereo") ,
+         wxT("HorizontalStereo") ,
+         wxT("VerticalStereo") ,
+      };
 
       int s = 0;
       s = automatic->GetValue() ? 0 : s;
@@ -2019,9 +2088,8 @@ void MeterPanel::OnPreferences(wxCommandEvent & WXUNUSED(event))
       // Currently, there are 2 playback meters and 2 record meters and any number of 
       // mixerboard meters, so we have to send out an preferences updated message to
       // ensure they all update themselves.
-      wxCommandEvent e(EVT_METER_PREFERENCES_CHANGED);
-      e.SetEventObject(this);
-      GetParent()->GetEventHandler()->ProcessEvent(e);
+      wxTheApp->AddPendingEvent(wxCommandEvent{
+         EVT_PREFS_UPDATE, MeterPrefsID() });
    }
 }
 
@@ -2038,13 +2106,6 @@ wxString MeterPanel::Key(const wxString & key) const
    }
 
    return wxT("/Meter/Output/") + key;
-}
-
-bool MeterPanel::s_AcceptsFocus{ false };
-
-auto MeterPanel::TemporarilyAllowFocus() -> TempAllowFocus {
-   s_AcceptsFocus = true;
-   return TempAllowFocus{ &s_AcceptsFocus };
 }
 
 // This compensates for a but in wxWidgets 3.0.2 for mac:
@@ -2116,7 +2177,7 @@ wxAccStatus MeterAx::GetDefaultAction(int WXUNUSED(childId), wxString* actionNam
 // Returns the description for this object or a child.
 wxAccStatus MeterAx::GetDescription(int WXUNUSED(childId), wxString *description)
 {
-   description->Clear();
+   description->clear();
    return wxACC_NOT_SUPPORTED;
 }
 
@@ -2134,7 +2195,7 @@ wxAccStatus MeterAx::GetFocus(int* childId, wxAccessible** child)
 // Returns help text for this object or a child, similar to tooltip text.
 wxAccStatus MeterAx::GetHelpText(int WXUNUSED(childId), wxString *helpText)
 {
-   helpText->Clear();
+   helpText->clear();
    return wxACC_NOT_SUPPORTED;
 }
 
@@ -2142,7 +2203,7 @@ wxAccStatus MeterAx::GetHelpText(int WXUNUSED(childId), wxString *helpText)
 // Return e.g. ALT+K
 wxAccStatus MeterAx::GetKeyboardShortcut(int WXUNUSED(childId), wxString *shortcut)
 {
-   shortcut->Clear();
+   shortcut->clear();
    return wxACC_OK;
 }
 
@@ -2170,10 +2231,10 @@ wxAccStatus MeterAx::GetName(int WXUNUSED(childId), wxString* name)
    else
    {
       *name = m->GetName();
-      if (name->IsEmpty())
+      if (name->empty())
          *name = m->GetLabel();
 
-      if (name->IsEmpty())
+      if (name->empty())
          *name = _("Meter");
 
       if (m->mMonitoring)

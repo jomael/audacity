@@ -11,7 +11,9 @@ Paul Licameli
 #ifndef __AUDACITY_WAVEFORM_SETTINGS__
 #define __AUDACITY_WAVEFORM_SETTINGS__
 
-class wxArrayString;
+#include "../Internat.h" // for TranslatableStrings
+
+class EnumValueSymbols;
 
 class WaveformSettings
 {
@@ -58,7 +60,7 @@ public:
       stNumScaleTypes,
    };
 
-   static const wxArrayString &GetScaleNames();
+   static const EnumValueSymbols &GetScaleNames();
 
    ScaleType scaleType;
    int dBRange;

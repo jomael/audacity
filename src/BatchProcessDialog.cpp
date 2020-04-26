@@ -17,6 +17,12 @@
 #include "Audacity.h"
 #include "BatchProcessDialog.h"
 
+#include <wx/setup.h> // for wxUSE_* macros
+
+#ifdef __WXMSW__
+    #include  <wx/ownerdrw.h>
+#endif
+
 #include <wx/defs.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
@@ -32,28 +38,33 @@
 #include <wx/imaglist.h>
 #include <wx/settings.h>
 
-#include "AudacityException.h"
 #include "ShuttleGui.h"
+#include "Menus.h"
 #include "Prefs.h"
 #include "Project.h"
-#include "Internat.h"
+#include "ProjectFileManager.h"
+#include "ProjectHistory.h"
+#include "ProjectManager.h"
+#include "ProjectWindow.h"
+#include "SelectUtilities.h"
 #include "commands/CommandManager.h"
-#include "commands/CommandContext.h"
 #include "effects/Effect.h"
 #include "../images/Arrow.xpm"
 #include "../images/Empty9x16.xpm"
-#include "BatchCommands.h"
-#include "Track.h"
 #include "UndoManager.h"
 
-#include "Theme.h"
 #include "AllThemeResources.h"
 
 #include "FileDialog.h"
 #include "FileNames.h"
 #include "import/Import.h"
 #include "widgets/ErrorDialog.h"
+#include "widgets/AudacityMessageBox.h"
 #include "widgets/HelpSystem.h"
+
+#if wxUSE_ACCESSIBILITY
+#include "widgets/WindowAccessible.h"
+#endif
 
 #define MacrosListID       7001
 #define CommandsListID     7002
@@ -69,19 +80,21 @@ BEGIN_EVENT_TABLE(ApplyMacroDialog, wxDialogWrapper)
    EVT_BUTTON(wxID_HELP, ApplyMacroDialog::OnHelp)
 END_EVENT_TABLE()
 
-ApplyMacroDialog::ApplyMacroDialog(wxWindow * parent, bool bInherited):
-   wxDialogWrapper(parent, wxID_ANY, _("Macros Palette"),
+ApplyMacroDialog::ApplyMacroDialog(
+   wxWindow * parent, AudacityProject &project, bool bInherited):
+   wxDialogWrapper(parent, wxID_ANY, XO("Macros Palette"),
             wxDefaultPosition, wxDefaultSize,
             wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
-   , mCatalog( GetActiveProject() )
+   , mMacroCommands{ project }
+   , mProject{ project }
+   , mCatalog( &project )
 {
-   //AudacityProject * p = GetActiveProject();
    mAbort = false;
    mbExpanded = false;
    if( bInherited )
       return;
-   SetLabel(_("Macros Palette"));         // Provide visual label
-   SetName(_("Macros Palette"));          // Provide audible label
+   SetLabel(XO("Macros Palette"));         // Provide visual label
+   SetName(XO("Macros Palette"));          // Provide audible label
    Populate();
 
 }
@@ -122,26 +135,41 @@ void ApplyMacroDialog::PopulateOrExchange(ShuttleGui &S)
 {
    /*i18n-hint: A macro is a sequence of commands that can be applied
       * to one or more audio files.*/
-   S.StartStatic(_("&Select Macro"), 1);
+   S.StartStatic(XO("Select Macro"), 1);
    {
-      S.SetStyle(wxSUNKEN_BORDER | wxLC_REPORT | wxLC_HRULES | wxLC_VRULES |
-                  wxLC_SINGLE_SEL);
-      mMacros = S.Id(MacrosListID).Prop(1).AddListControlReportMode();
-      mMacros->InsertColumn(0, _("Macro"), wxLIST_FORMAT_LEFT);
+      mMacros = S.Id(MacrosListID).Prop(1)
+         .Style(wxSUNKEN_BORDER | wxLC_REPORT | wxLC_HRULES | wxLC_VRULES |
+             wxLC_SINGLE_SEL)
+              // i18n-hint: This is the heading for a column in the edit macros dialog
+              .AddListControlReportMode( { XO("Macro") } );
    }
    S.EndStatic();
 
    S.StartHorizontalLay(wxEXPAND, 0);
    {
-      S.AddPrompt( _("Apply Macro to:") );
-      S.Id(ApplyToProjectID).AddButton(_("&Project"));
-      S.Id(ApplyToFilesID).AddButton(_("&Files..."));
+      S.AddPrompt( XO("Apply Macro to:") );
+      wxButton* btn = S.Id(ApplyToProjectID)
+         .Name(XO("Apply macro to project"))
+         .AddButton(XO("&Project"));
+#if wxUSE_ACCESSIBILITY
+      // so that name can be set on a standard control
+      btn->SetAccessible(safenew WindowAccessible(btn));
+#endif
+
+      btn = S.Id(ApplyToFilesID)
+         .Name(XO("Apply macro to files..."))
+         .AddButton(XO("&Files..."));
+#if wxUSE_ACCESSIBILITY
+      // so that name can be set on a standard control
+      btn->SetAccessible(safenew WindowAccessible(btn));
+#endif
    }
    S.EndHorizontalLay();
 
    S.StartHorizontalLay(wxEXPAND, 0);
    {
-      mResize = S.Id(ExpandID).AddButton(_("&Expand"));
+      /* i18n-hint: The Expand button makes the dialog bigger, with more in it */
+      mResize = S.Id(ExpandID).AddButton(XO("&Expand"));
       S.Prop(1).AddSpace( 10 );
       S.AddStandardButtons( eCancelButton | eHelpButton);
    }
@@ -153,12 +181,12 @@ void ApplyMacroDialog::PopulateOrExchange(ShuttleGui &S)
 /// a shared function.
 void ApplyMacroDialog::PopulateMacros()
 {
-   wxArrayString names = mMacroCommands.GetNames();
+   auto names = mMacroCommands.GetNames();
    int i;
 
    int topItem = mMacros->GetTopItem();
    mMacros->DeleteAllItems();
-   for (i = 0; i < (int)names.GetCount(); i++) {
+   for (i = 0; i < (int)names.size(); i++) {
       mMacros->InsertItem(i, names[i]);
    }
 
@@ -170,7 +198,8 @@ void ApplyMacroDialog::PopulateMacros()
    }
 
    // Select the name in the list...this will fire an event.
-   mMacros->SetItemState(item, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+   mMacros->SetItemState(item, wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
+      wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
 
    if( 0 <= topItem && topItem < (int)mMacros->GetItemCount())
    {
@@ -197,13 +226,13 @@ void ApplyMacroDialog::OnApplyToProject(wxCommandEvent & WXUNUSED(event))
                                     wxLIST_STATE_SELECTED);
 
    if (item == -1) {
-      AudacityMessageBox(_("No macro selected"));
+      AudacityMessageBox(XO("No macro selected"));
       return;
    }
    ApplyMacroToProject( item );
 }
 
-wxString ApplyMacroDialog::MacroIdOfName( const wxString & MacroName )
+CommandID ApplyMacroDialog::MacroIdOfName( const wxString & MacroName )
 {
    wxString Temp = MacroName;
    Temp.Replace(" ","");
@@ -213,7 +242,7 @@ wxString ApplyMacroDialog::MacroIdOfName( const wxString & MacroName )
 
 // Apply macro, given its ID.
 // Does nothing if not found, rather than returning an error.
-void ApplyMacroDialog::ApplyMacroToProject( const wxString & MacroID, bool bHasGui )
+void ApplyMacroDialog::ApplyMacroToProject( const CommandID & MacroID, bool bHasGui )
 {
    for( int i=0;i<mMacros->GetItemCount();i++){
       wxString name = mMacros->GetItemText(i);
@@ -228,11 +257,12 @@ void ApplyMacroDialog::ApplyMacroToProject( const wxString & MacroID, bool bHasG
 void ApplyMacroDialog::ApplyMacroToProject( int iMacro, bool bHasGui )
 {
    wxString name = mMacros->GetItemText(iMacro);
-   if( name.IsEmpty() )
+   if( name.empty() )
       return;
 
+#ifdef OPTIONAL_ACTIVITY_WINDOW
    wxDialogWrapper activityWin( this, wxID_ANY, GetTitle());
-   activityWin.SetName(activityWin.GetTitle());
+   activityWin.SetName();
    ShuttleGui S(&activityWin, eIsCreating);
 
    S.StartHorizontalLay(wxCENTER, false);
@@ -240,8 +270,8 @@ void ApplyMacroDialog::ApplyMacroToProject( int iMacro, bool bHasGui )
       S.StartStatic( {}, false);   // deliberately not translated (!)
       {
          S.SetBorder(20);
-         S.AddFixedText(wxString::Format(_("Applying '%s' to current project"),
-                                         name));
+         S.AddFixedText(XO("Applying '%s' to current project")
+            .Format( name ) );
       }
       S.EndStatic();
    }
@@ -258,6 +288,7 @@ void ApplyMacroDialog::ApplyMacroToProject( int iMacro, bool bHasGui )
 
    // Without this the newly created dialog may not show completely.
    wxYield();
+#endif
 
    //Since we intend to keep this dialog open, there is no reason to hide it 
    //and then show it again.
@@ -273,7 +304,9 @@ void ApplyMacroDialog::ApplyMacroToProject( int iMacro, bool bHasGui )
    // the menus on OSX will remain disabled.
    bool success;
    {
+#ifdef OPTIONAL_ACTIVITY_WINDOW
       wxWindowDisabler wd(&activityWin);
+#endif
       success = GuardedCall< bool >(
          [this]{ return mMacroCommands.ApplyMacro(mCatalog); } );
    }
@@ -291,7 +324,7 @@ void ApplyMacroDialog::OnApplyToFiles(wxCommandEvent & WXUNUSED(event))
                                     wxLIST_NEXT_ALL,
                                     wxLIST_STATE_SELECTED);
    if (item == -1) {
-      AudacityMessageBox(_("No macro selected"));
+      AudacityMessageBox( XO("No macro selected") );
       return;
    }
 
@@ -299,62 +332,26 @@ void ApplyMacroDialog::OnApplyToFiles(wxCommandEvent & WXUNUSED(event))
    gPrefs->Write(wxT("/Batch/ActiveMacro"), name);
    gPrefs->Flush();
 
-   AudacityProject *project = GetActiveProject();
-   if (!project->GetIsEmpty()) {
-      AudacityMessageBox(_("Please save and close the current project first."));
+   AudacityProject *project = &mProject;
+   if (!TrackList::Get( *project ).empty()) {
+      AudacityMessageBox(
+         XO("Please save and close the current project first.") );
       return;
    }
 
-   wxString prompt =  _("Select file(s) for batch processing...");
+   auto prompt =  XO("Select file(s) for batch processing...");
 
-   FormatList l;
-   wxString filter;
-   wxString all;
-
-   Importer::Get().GetSupportedImportFormats(&l);
-   for (const auto &format : l) {
-      const Format *f = &format;
-
-      wxString newfilter = f->formatName + wxT("|");
-      for (size_t i = 0; i < f->formatExtensions.size(); i++) {
-         if (!newfilter.Contains(wxT("*.") + f->formatExtensions[i] + wxT(";")))
-            newfilter += wxT("*.") + f->formatExtensions[i] + wxT(";");
-         if (!all.Contains(wxT("*.") + f->formatExtensions[i] + wxT(";")))
-            all += wxT("*.") + f->formatExtensions[i] + wxT(";");
-      }
-      newfilter.RemoveLast(1);
-      filter += newfilter;
-      filter += wxT("|");
-   }
-   all.RemoveLast(1);
-   filter.RemoveLast(1);
-
-   wxString mask = _("All files|*|All supported files|") +
-                   all + wxT("|") +
-                   filter;
-
-   wxString type = gPrefs->Read(wxT("/DefaultOpenType"),mask.BeforeFirst(wxT('|')));
-   // Convert the type to the filter index
-   int index = mask.First(type + wxT("|"));
-   if (index == wxNOT_FOUND) {
-      index = 0;
-   }
-   else {
-      index = mask.Left(index).Freq(wxT('|')) / 2;
-      if (index < 0) {
-         index = 0;
-      }
-   }
+   const auto fileTypes = Importer::Get().GetFileTypes();
 
    auto path = FileNames::FindDefaultPath(FileNames::Operation::Open);
    FileDialogWrapper dlog(this,
-                   prompt,
-                   path,
-                   wxT(""),
-                   mask,
-                   wxFD_OPEN | wxFD_MULTIPLE | wxRESIZE_BORDER);
+      prompt,
+      path,
+      wxT(""),
+      fileTypes,
+      wxFD_OPEN | wxFD_MULTIPLE | wxRESIZE_BORDER);
 
-   dlog.SetFilterIndex(index);
+   dlog.SetFilterIndex( Importer::SelectDefaultOpenType( fileTypes ) );
    if (dlog.ShowModal() != wxID_OK) {
       Raise();
       return;
@@ -366,39 +363,39 @@ void ApplyMacroDialog::OnApplyToFiles(wxCommandEvent & WXUNUSED(event))
 
    files.Sort();
 
-   wxDialogWrapper activityWin(this, wxID_ANY, GetTitle());
-   activityWin.SetName(activityWin.GetTitle());
+   wxDialogWrapper activityWin(this, wxID_ANY, Verbatim( GetTitle() ) );
+   activityWin.SetName();
    ShuttleGui S(&activityWin, eIsCreating);
 
    wxListCtrl * fileList = NULL;
 
    S.StartVerticalLay(false);
    {
-      S.StartStatic(_("Applying..."), 1);
+      S.StartStatic(XO("Applying..."), 1);
       {
          auto imageList = std::make_unique<wxImageList>(9, 16);
          imageList->Add(wxIcon(empty9x16_xpm));
          imageList->Add(wxIcon(arrow_xpm));
 
-         S.SetStyle(wxSUNKEN_BORDER | wxLC_REPORT | wxLC_HRULES | wxLC_VRULES |
-                    wxLC_SINGLE_SEL);
-         fileList = S.Id(CommandsListID).AddListControlReportMode();
+         fileList = S.Id(CommandsListID)
+            .Style(wxSUNKEN_BORDER | wxLC_REPORT | wxLC_HRULES | wxLC_VRULES |
+                wxLC_SINGLE_SEL)
+            .AddListControlReportMode( { XO("File") } );
          // AssignImageList takes ownership
          fileList->AssignImageList(imageList.release(), wxIMAGE_LIST_SMALL);
-         fileList->InsertColumn(0, _("File"), wxLIST_FORMAT_LEFT);
       }
       S.EndStatic();
 
       S.StartHorizontalLay(wxCENTER, false);
       {
-         S.Id(wxID_CANCEL).AddButton(_("&Cancel"));
+         S.Id(wxID_CANCEL).AddButton(XO("&Cancel"));
       }
       S.EndHorizontalLay();
    }
    S.EndVerticalLay();
 
    int i;
-   for (i = 0; i < (int)files.GetCount(); i++ ) {
+   for (i = 0; i < (int)files.size(); i++ ) {
       fileList->InsertItem(i, files[i], i == 0);
    }
 
@@ -428,7 +425,7 @@ void ApplyMacroDialog::OnApplyToFiles(wxCommandEvent & WXUNUSED(event))
    Hide();
 
    mMacroCommands.ReadMacro(name);
-   for (i = 0; i < (int)files.GetCount(); i++) {
+   for (i = 0; i < (int)files.size(); i++) {
       wxWindowDisabler wd(&activityWin);
       if (i > 0) {
          //Clear the arrow in previous item.
@@ -438,9 +435,9 @@ void ApplyMacroDialog::OnApplyToFiles(wxCommandEvent & WXUNUSED(event))
       fileList->EnsureVisible(i);
 
       auto success = GuardedCall< bool >( [&] {
-         project->Import(files[i]);
-         project->ZoomAfterImport(nullptr);
-         project->OnSelectAll(*project);
+         ProjectFileManager::Get( *project ).Import(files[i]);
+         ProjectWindow::Get( *project ).ZoomAfterImport(nullptr);
+         SelectUtilities::DoSelectAll(*project);
          if (!mMacroCommands.ApplyMacro(mCatalog))
             return false;
 
@@ -453,13 +450,9 @@ void ApplyMacroDialog::OnApplyToFiles(wxCommandEvent & WXUNUSED(event))
       if (!success)
          break;
       
-      UndoManager *um = project->GetUndoManager();
-      um->ClearStates();
-      project->OnSelectAll(*project);
-      project->OnRemoveTracks(*project);
+      ProjectManager::Get( *project ).ResetProjectToEmpty();
    }
-   project->OnRemoveTracks(*project);
-   
+
    Show();
    Raise();
 }
@@ -485,6 +478,7 @@ enum {
    UpButtonID,
    DownButtonID,
    RenameButtonID,
+   RestoreButtonID,
 // MacrosListID             7005
 // CommandsListID,       7002
 // Re-Use IDs from ApplyMacroDialog.
@@ -500,6 +494,7 @@ BEGIN_EVENT_TABLE(MacrosWindow, ApplyMacroDialog)
    EVT_BUTTON(AddButtonID, MacrosWindow::OnAdd)
    EVT_BUTTON(RemoveButtonID, MacrosWindow::OnRemove)
    EVT_BUTTON(RenameButtonID, MacrosWindow::OnRename)
+   EVT_BUTTON(RestoreButtonID, MacrosWindow::OnRestore)
    EVT_BUTTON(ExpandID, MacrosWindow::OnExpand)
    EVT_BUTTON(ShrinkID, MacrosWindow::OnShrink)
 
@@ -511,7 +506,6 @@ BEGIN_EVENT_TABLE(MacrosWindow, ApplyMacroDialog)
    EVT_BUTTON(DeleteButtonID, MacrosWindow::OnDelete)
    EVT_BUTTON(UpButtonID, MacrosWindow::OnUp)
    EVT_BUTTON(DownButtonID, MacrosWindow::OnDown)
-   EVT_BUTTON(DefaultsButtonID, MacrosWindow::OnDefaults)
 
    EVT_BUTTON(wxID_OK, MacrosWindow::OnOK)
    EVT_BUTTON(wxID_CANCEL, MacrosWindow::OnCancel)
@@ -520,18 +514,19 @@ BEGIN_EVENT_TABLE(MacrosWindow, ApplyMacroDialog)
 END_EVENT_TABLE()
 
 enum {
-   BlankColumn,
    ItemNumberColumn,
    ActionColumn,
    ParamsColumn,
 };
 
 /// Constructor
-MacrosWindow::MacrosWindow(wxWindow * parent, bool bExpanded):
-   ApplyMacroDialog(parent, true)
+MacrosWindow::MacrosWindow(
+   wxWindow * parent, AudacityProject &project, bool bExpanded):
+   ApplyMacroDialog(parent, project, true)
+   , mProject{ project }
 {
    mbExpanded = bExpanded;
-   wxString Title = mbExpanded ? _("Manage Macros") : _("Macros Palette");
+   auto Title = WindowTitle();
    SetLabel( Title );   // Provide visual label
    SetName(  Title );   // Provide audible label
    SetTitle( Title );
@@ -588,22 +583,30 @@ void MacrosWindow::PopulateOrExchange(ShuttleGui & S)
 {
    S.StartHorizontalLay(wxEXPAND, 1);
    {
-      S.StartStatic(_("&Select Macro"),0);
+      S.StartStatic(XO("Select Macro"),0);
       {
          S.StartHorizontalLay(wxEXPAND,1);
          {
-            S.SetStyle(wxSUNKEN_BORDER | wxLC_REPORT | wxLC_HRULES | wxLC_SINGLE_SEL |
-                        wxLC_EDIT_LABELS);
-            mMacros = S.Id(MacrosListID).Prop(1).AddListControlReportMode();
-            // i18n-hint: This is the heading for a column in the edit macros dialog
-            mMacros->InsertColumn(0, _("Macro"), wxLIST_FORMAT_LEFT);
+            mMacros = S.Id(MacrosListID).Prop(1)
+               .Style(wxSUNKEN_BORDER | wxLC_REPORT | wxLC_HRULES
+                      | wxLC_SINGLE_SEL | wxLC_EDIT_LABELS)
+              // i18n-hint: This is the heading for a column in the edit macros dialog
+              .AddListControlReportMode( { XO("Macro") } );
             S.StartVerticalLay(wxALIGN_TOP, 0);
             {
-               S.Id(AddButtonID).AddButton(_("&New"));
-               mRemove = S.Id(RemoveButtonID).AddButton(_("Remo&ve"));
-               mRename = S.Id(RenameButtonID).AddButton(_("&Rename..."));
-               S.Id(ImportButtonID).AddButton(_("I&mport..."))->Enable( false);
-               S.Id(ExportButtonID).AddButton(_("E&xport..."))->Enable( false);
+               S.Id(AddButtonID).AddButton(XO("&New"));
+               mRemove = S.Id(RemoveButtonID).AddButton(XO("Remo&ve"));
+               mRename = S.Id(RenameButtonID).AddButton(XO("&Rename..."));
+               mRestore = S.Id(RestoreButtonID).AddButton(XO("Re&store"));
+// Not yet ready for prime time.
+#if 0
+               S.Id(ImportButtonID)
+                  .Disable()
+                  .AddButton(XO("I&mport..."));
+               S.Id(ExportButtonID)
+                  .Disable()
+                  .AddButton(XO("E&xport..."));
+#endif
             }
             S.EndVerticalLay();
          }
@@ -611,31 +614,28 @@ void MacrosWindow::PopulateOrExchange(ShuttleGui & S)
       }
       S.EndStatic();
 
-      S.StartStatic(_("Edit S&teps"), true);
+      S.StartStatic(XO("Edit Steps"), true);
       {
          S.StartHorizontalLay(wxEXPAND,1);
          {
             
-            S.SetStyle(wxSUNKEN_BORDER | wxLC_REPORT | wxLC_HRULES | wxLC_VRULES |
-                        wxLC_SINGLE_SEL);
-            mList = S.Id(CommandsListID).AddListControlReportMode();
-
-            //An empty first column is a workaround - under Win98 the first column
-            //can't be right aligned.
-            mList->InsertColumn(BlankColumn, wxT(""), wxLIST_FORMAT_LEFT);
-            /* i18n-hint: This is the number of the command in the list */
-            mList->InsertColumn(ItemNumberColumn, _("Num"), wxLIST_FORMAT_RIGHT);
-            mList->InsertColumn(ActionColumn, _("Command  "), wxLIST_FORMAT_RIGHT);
-            mList->InsertColumn(ParamsColumn, _("Parameters"), wxLIST_FORMAT_LEFT);
+            mList = S.Id(CommandsListID)
+               .Style(wxSUNKEN_BORDER | wxLC_REPORT | wxLC_HRULES | wxLC_VRULES |
+                   wxLC_SINGLE_SEL)
+               .AddListControlReportMode({
+                  /* i18n-hint: This is the number of the command in the list */
+                  { XO("Num"), wxLIST_FORMAT_RIGHT },
+                  { XO("Command  "), wxLIST_FORMAT_RIGHT },
+                  { XO("Parameters"), wxLIST_FORMAT_LEFT }
+                });
 
             S.StartVerticalLay(wxALIGN_TOP, 0);
             {
-               S.Id(InsertButtonID).AddButton(_("&Insert"), wxALIGN_LEFT);
-               S.Id(EditButtonID).AddButton(_("&Edit..."), wxALIGN_LEFT);
-               S.Id(DeleteButtonID).AddButton(_("De&lete"), wxALIGN_LEFT);
-               S.Id(UpButtonID).AddButton(_("Move &Up"), wxALIGN_LEFT);
-               S.Id(DownButtonID).AddButton(_("Move &Down"), wxALIGN_LEFT);
-               mDefaults = S.Id(DefaultsButtonID).AddButton(_("De&faults"));
+               S.Id(InsertButtonID).AddButton(XO("&Insert"), wxALIGN_LEFT);
+               S.Id(EditButtonID).AddButton(XO("&Edit..."), wxALIGN_LEFT);
+               S.Id(DeleteButtonID).AddButton(XO("De&lete"), wxALIGN_LEFT);
+               S.Id(UpButtonID).AddButton(XO("Move &Up"), wxALIGN_LEFT);
+               S.Id(DownButtonID).AddButton(XO("Move &Down"), wxALIGN_LEFT);
             }
             S.EndVerticalLay();
          }
@@ -647,11 +647,26 @@ void MacrosWindow::PopulateOrExchange(ShuttleGui & S)
 
    S.StartHorizontalLay(wxEXPAND, 0);
    {  
-      mResize = S.Id(ShrinkID).AddButton(_("Shrin&k"));
+      /* i18n-hint: The Shrink button makes the dialog smaller, with less in it */
+      mResize = S.Id(ShrinkID).AddButton(XO("Shrin&k"));
       // Using variable text just to get the positioning options.
-      S.Prop(0).AddVariableText( _("Apply Macro to:"), false, wxALL | wxALIGN_CENTRE_VERTICAL );
-      S.Id(ApplyToProjectID).AddButton(_("&Project"));
-      S.Id(ApplyToFilesID).AddButton(_("&Files..."));
+      S.Prop(0).AddVariableText(
+         XO("Apply Macro to:"), false, wxALL | wxALIGN_CENTRE_VERTICAL );
+      wxButton* btn = S.Id(ApplyToProjectID)
+         .Name(XO("Apply macro to project"))
+         .AddButton(XO("&Project"));
+#if wxUSE_ACCESSIBILITY
+      // so that name can be set on a standard control
+      btn->SetAccessible(safenew WindowAccessible(btn));
+#endif
+
+      btn = S.Id(ApplyToFilesID)
+         .Name(XO("Apply macro to files..."))
+         .AddButton(XO("&Files..."));
+#if wxUSE_ACCESSIBILITY
+      // so that name can be set on a standard control
+      btn->SetAccessible(safenew WindowAccessible(btn));
+#endif
       S.Prop(1).AddSpace( 10 );
       S.AddStandardButtons( eOkButton | eCancelButton | eHelpButton);
    }
@@ -678,7 +693,9 @@ void MacrosWindow::PopulateList()
    if (mSelectedCommand >= (int)mList->GetItemCount()) {
       mSelectedCommand = 0;
    }
-   mList->SetItemState(mSelectedCommand, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+   mList->SetItemState(mSelectedCommand,
+      wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
+      wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
    if( 0 <= topItem && topItem < (int)mList->GetItemCount())
    {
       // Workaround for scrolling being windows only.
@@ -693,20 +710,19 @@ void MacrosWindow::PopulateList()
 }
 
 /// Add one item into mList
-void MacrosWindow::AddItem(const wxString &Action, const wxString &Params)
+void MacrosWindow::AddItem(const CommandID &Action, const wxString &Params)
 {
    auto entry = mCatalog.ByCommandId(Action);
    auto friendlyName = entry != mCatalog.end()
-      ? entry->name.Translated()
+      ? entry->name.StrippedTranslation()
       :
-         // Expose an internal name to the user in default of any friendly name
-         // -- AVOID THIS!
-        Action;
+         // uh oh, using GET to expose an internal name to the user!
+         // in default of any better friendly name
+        Action.GET();
 
    int i = mList->GetItemCount();
 
-   mList->InsertItem(i, wxT(""));
-   mList->SetItem(i, ItemNumberColumn, wxString::Format(wxT(" %02i"), i + 1));
+   mList->InsertItem(i, wxString::Format(wxT(" %02i"), i + 1));
    mList->SetItem(i, ActionColumn, friendlyName );
    mList->SetItem(i, ParamsColumn, Params );
 }
@@ -714,7 +730,8 @@ void MacrosWindow::AddItem(const wxString &Action, const wxString &Params)
 void MacrosWindow::UpdateMenus()
 {
    // OK even on mac, as dialog is modal.
-   GetActiveProject()->RebuildMenuBar();
+   auto p = &mProject;
+   MenuManager::Get(*p).RebuildMenuBar(*p);
 }
 
 void MacrosWindow::UpdateDisplay( bool bExpanded )
@@ -746,7 +763,7 @@ void MacrosWindow::UpdateDisplay( bool bExpanded )
    SetPosition( p );
    mResize->SetFocus();
 
-   wxString Title = mbExpanded ? _("Manage Macros") : _("Macros Palette");
+   auto Title = WindowTitle();
    SetLabel( Title );         // Provide visual label
    SetName( Title );          // Provide audible label
    SetTitle( Title );
@@ -762,14 +779,15 @@ void MacrosWindow::OnShrink(wxCommandEvent &WXUNUSED(event))
 bool MacrosWindow::ChangeOK()
 {
    if (mChanged) {
-      wxString title;
-      wxString msg;
       int id;
 
-      title.Printf(_("%s changed"), mActiveMacro);
-      msg = _("Do you want to save the changes?");
+      auto title = XO("%s changed").Format( mActiveMacro );
+      auto msg = XO("Do you want to save the changes?");
 
-      id = AudacityMessageBox(msg, title, wxYES_NO | wxCANCEL);
+      id = AudacityMessageBox(
+         msg,
+         title,
+         wxYES_NO | wxCANCEL);
       if (id == wxCANCEL) {
          return false;
       }
@@ -803,12 +821,12 @@ void MacrosWindow::OnMacroSelected(wxListEvent & event)
    if (mMacroCommands.IsFixed(mActiveMacro)) {
       mRemove->Disable();
       mRename->Disable();
-      mDefaults->Enable();
+      mRestore->Enable();
    }
    else {
       mRemove->Enable();
       mRename->Enable();
-      mDefaults->Disable();
+      mRestore->Disable();
    }
 
    PopulateList();
@@ -823,7 +841,7 @@ void MacrosWindow::OnListSelected(wxListEvent & WXUNUSED(event))
 /// The window has been resized.
 void MacrosWindow::OnSize(wxSizeEvent & WXUNUSED(event))
 {
-   // Refrsh the layout and re-fit the columns.
+   // Refresh the layout and re-fit the columns.
    Layout();
    if( !mbExpanded )
       return;
@@ -832,13 +850,12 @@ void MacrosWindow::OnSize(wxSizeEvent & WXUNUSED(event))
 
 void MacrosWindow::FitColumns()
 {
-   mList->SetColumnWidth(0, 0);  // First column width is zero, to hide it.
 
 #if defined(__WXMAC__)
    // wxMac uses a hard coded width of 150 when wxLIST_AUTOSIZE_USEHEADER
    // is specified, so we calculate the width ourselves. This method may
    // work equally well on other platforms.
-   for (size_t c = 1; c < mList->GetColumnCount(); c++) {
+   for (size_t c = 0; c < mList->GetColumnCount(); c++) {
       wxListItem info;
       int width;
 
@@ -860,17 +877,17 @@ void MacrosWindow::FitColumns()
    // user attempts to resize the columns.
    mList->SetClientSize(mList->GetClientSize());
 #else
+   mList->SetColumnWidth(0, wxLIST_AUTOSIZE_USEHEADER);
    mList->SetColumnWidth(1, wxLIST_AUTOSIZE_USEHEADER);
-   mList->SetColumnWidth(2, wxLIST_AUTOSIZE_USEHEADER);
-   mList->SetColumnWidth(3, wxLIST_AUTOSIZE);
+   mList->SetColumnWidth(2, wxLIST_AUTOSIZE);
 #endif
 
-   int bestfit = mList->GetColumnWidth(3);
+   int bestfit = mList->GetColumnWidth(2);
    int clientsize = mList->GetClientSize().GetWidth();
+   int col0 = mList->GetColumnWidth(0);
    int col1 = mList->GetColumnWidth(1);
-   int col2 = mList->GetColumnWidth(2);
-   bestfit = (bestfit > clientsize-col1-col2)? bestfit : clientsize-col1-col2;
-   mList->SetColumnWidth(3, bestfit);
+   bestfit = (bestfit > clientsize-col0-col1)? bestfit : clientsize-col0-col1;
+   mList->SetColumnWidth(2, bestfit);
 
 }
 
@@ -881,35 +898,48 @@ void MacrosWindow::OnMacrosBeginEdit(wxListEvent &event)
 
    wxString macro = mMacros->GetItemText(itemNo);
 
-   if (mMacroCommands.IsFixed(mActiveMacro)) {
+   if (mMacroCommands.IsFixed(macro)) {
       wxBell();
       event.Veto();
    }
+   if( mMacroBeingRenamed.IsEmpty())
+      mMacroBeingRenamed = macro;
 }
 
 ///
 void MacrosWindow::OnMacrosEndEdit(wxListEvent &event)
 {
    if (event.IsEditCancelled()) {
+      mMacroBeingRenamed = "";
       return;
    }
 
+   if( mMacroBeingRenamed.IsEmpty())
+      return;
+
    wxString newname = event.GetLabel();
 
-   mMacroCommands.RenameMacro(mActiveMacro, newname);
-
-   mActiveMacro = newname;
-
+   mMacroCommands.RenameMacro(mMacroBeingRenamed, newname);
+   if( mMacroBeingRenamed == mActiveMacro )
+      mActiveMacro = newname;
+   mMacroBeingRenamed="";
    PopulateMacros();
+   UpdateMenus();   
+   event.Veto();
 }
 
 ///
 void MacrosWindow::OnAdd(wxCommandEvent & WXUNUSED(event))
 {
+   // Similar to Bug 2284 we may need to save a changed macro.
+   if (!ChangeOK()) {
+      return;
+   }
+
    while (true) {
       AudacityTextEntryDialog d(this,
-                          _("Enter name of new macro"),
-                          _("Name of new macro"));
+         XO("Enter name of new macro"),
+         XO("Name of new macro"));
       d.SetName(d.GetTitle());
       wxString name;
 
@@ -921,22 +951,24 @@ void MacrosWindow::OnAdd(wxCommandEvent & WXUNUSED(event))
 
       name = d.GetValue().Strip(wxString::both);
 
-      if (name.Length() == 0) {
-         AudacityMessageBox(_("Name must not be blank"),
-                      GetTitle(),
-                      wxOK | wxICON_ERROR,
-                      this);
+      if (name.length() == 0) {
+         AudacityMessageBox(
+            XO("Name must not be blank"),
+            WindowTitle(),
+            wxOK | wxICON_ERROR,
+            this);
          continue;
       }
 
       if (name.Contains(wxFILE_SEP_PATH) ||
           name.Contains(wxFILE_SEP_PATH_UNIX)) {
-         /*i18n-hint: The %c will be replaced with 'forbidden characters', like '/' and '\'.*/
-         AudacityMessageBox(wxString::Format(_("Names may not contain '%c' and '%c'"),
-                      wxFILE_SEP_PATH, wxFILE_SEP_PATH_UNIX),
-                      GetTitle(),
-                      wxOK | wxICON_ERROR,
-                      this);
+         AudacityMessageBox(
+            /*i18n-hint: The %c will be replaced with 'forbidden characters', like '/' and '\'.*/
+            XO("Names may not contain '%c' and '%c'")
+               .Format(wxFILE_SEP_PATH, wxFILE_SEP_PATH_UNIX),
+            WindowTitle(),
+            wxOK | wxICON_ERROR,
+            this);
          continue;
       }
 
@@ -962,11 +994,12 @@ void MacrosWindow::OnRemove(wxCommandEvent & WXUNUSED(event))
    }
 
    wxString name = mMacros->GetItemText(item);
-   AudacityMessageDialog m(this,
-   /*i18n-hint: %s will be replaced by the name of a file.*/
-                     wxString::Format(_("Are you sure you want to delete %s?"), name),
-                     GetTitle(),
-                     wxYES_NO | wxICON_QUESTION);
+   AudacityMessageDialog m(
+      this,
+      /*i18n-hint: %s will be replaced by the name of a file.*/
+      XO("Are you sure you want to delete %s?").Format( name ),
+      Verbatim( GetTitle() ),
+      wxYES_NO | wxICON_QUESTION );
    if (m.ShowModal() == wxID_NO) {
       Raise();
       return;
@@ -980,6 +1013,10 @@ void MacrosWindow::OnRemove(wxCommandEvent & WXUNUSED(event))
       item--;
    }
 
+   // Bug 2284.  The macro we have just removed might have been 
+   // changed.  Since we've just deleted the macro, we should
+   // forget about that change.
+   mChanged = false;
    mActiveMacro = mMacros->GetItemText(item);
 
    PopulateMacros();
@@ -998,6 +1035,16 @@ void MacrosWindow::OnRename(wxCommandEvent & WXUNUSED(event))
 
    mMacros->EditLabel(item);
    UpdateMenus();
+}
+
+/// Reset a built in macro.
+void MacrosWindow::OnRestore(wxCommandEvent & WXUNUSED(event))
+{
+   mMacroCommands.RestoreMacro(mActiveMacro);
+
+   mChanged = true;
+
+   PopulateList();
 }
 
 /// An item in the list has been selected.
@@ -1026,7 +1073,7 @@ void MacrosWindow::InsertCommandAt(int item)
       return;
    }
 
-   MacroCommandDialog d(this, wxID_ANY);
+   MacroCommandDialog d(this, wxID_ANY, mProject);
 
    if (!d.ShowModal()) {
       Raise();
@@ -1034,7 +1081,7 @@ void MacrosWindow::InsertCommandAt(int item)
    }
    Raise();
 
-   if(d.mSelectedCommand != wxT(""))
+   if(!d.mSelectedCommand.empty())
    {
       mMacroCommands.AddToMacro(d.mSelectedCommand,
                                 d.mSelectedParameters,
@@ -1063,16 +1110,20 @@ void MacrosWindow::OnEditCommandParams(wxCommandEvent & WXUNUSED(event))
    }
 
    // Just edit the parameters, and not the command.
-   wxString command = mMacroCommands.GetCommand(item);
+   auto command = mMacroCommands.GetCommand(item);
    wxString params  = mMacroCommands.GetParams(item);
+   wxString oldParams = params;
 
-   params = MacroCommands::PromptForParamsFor(command, params, this).Trim();
+   params = MacroCommands::PromptForParamsFor(command, params, *this).Trim();
    Raise();
+
+   if (oldParams == params)
+      return; // They did not actually make any changes..
 
    mMacroCommands.DeleteFromMacro(item);
    mMacroCommands.AddToMacro(command,
-                             params,
-                             item);
+      params,
+      item);
    mChanged = true;
    mSelectedCommand = item;
    PopulateList();
@@ -1150,16 +1201,6 @@ void MacrosWindow::OnApplyToFiles(wxCommandEvent & event)
    ApplyMacroDialog::OnApplyToFiles( event );
 }
 
-/// Select the empty Command macro.
-void MacrosWindow::OnDefaults(wxCommandEvent & WXUNUSED(event))
-{
-   mMacroCommands.RestoreMacro(mActiveMacro);
-
-   mChanged = true;
-
-   PopulateList();
-}
-
 bool MacrosWindow::SaveChanges(){
    gPrefs->Write(wxT("/Batch/ActiveMacro"), mActiveMacro);
    gPrefs->Flush();
@@ -1199,4 +1240,9 @@ void MacrosWindow::OnKeyDown(wxKeyEvent &event)
    }
 
    event.Skip();
+}
+
+TranslatableString MacrosWindow::WindowTitle() const
+{
+   return mbExpanded ? XO("Manage Macros") : XO("Macros Palette");
 }

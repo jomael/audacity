@@ -21,17 +21,23 @@ parameters.  It is for development purposes.
 
 #include "../Audacity.h"
 #include "Demo.h"
+#include "LoadCommands.h"
 
 #include <float.h>
 
 #include <wx/intl.h>
 
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 #include "../widgets/valnum.h"
-#include "../SampleFormat.h"
-#include "../commands/Command.h"
 #include "../commands/CommandContext.h"
+
+const ComponentInterfaceSymbol DemoCommand::Symbol
+{ XO("Demo") };
+
+//Don't register the demo command.  
+//namespace{ BuiltinCommandsModule::Registration< DemoCommand > reg; }
 
 bool DemoCommand::DefineParams( ShuttleParams & S ){
    S.Define( delay, wxT("Delay"), 1.0f, 0.001f,  FLT_MAX, 1.0f );
@@ -50,8 +56,8 @@ void DemoCommand::PopulateOrExchange(ShuttleGui & S)
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
-      S.TieTextBox(_("Delay time (seconds):"),delay);
-      S.TieTextBox(_("Decay factor:"),decay);
+      S.TieTextBox(XO("Delay time (seconds):"),delay);
+      S.TieTextBox(XO("Decay factor:"),decay);
    }
    S.EndMultiColumn();
 }

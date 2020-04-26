@@ -44,8 +44,10 @@
 #include <wx/dynlib.h>
 #include <wx/filename.h>
 #include <wx/scopeguard.h>
+#include <wx/sizer.h>
 #include <wx/tokenzr.h>
 #include <wx/modalhook.h>
+#include <wx/filectrl.h>
 
 #include "../FileDialog.h"
 
@@ -717,6 +719,28 @@ void FileDialog::GetPaths(wxArrayString& paths) const
 void FileDialog::GetFilenames(wxArrayString& files) const
 {
    files = m_fileNames;
+}
+
+void FileDialog::SetFileExtension(const wxString& extension)
+{
+   if (mParentDlg)
+   {
+      wxChar path[wxMAXPATH];
+
+      if (CommDlg_OpenSave_GetFilePath(mParentDlg, path, WXSIZEOF(path)))
+      {
+         wxFileName fn(path);
+         fn.SetExt(extension);
+
+         // Change the currently entered file name.
+         CommDlg_OpenSave_SetControlText(mParentDlg, edt1, fn.GetFullName().t_str());
+
+         // Make this the default extension as well. So if the user specifies a file
+         // name without an extension, this one will be used instead of the first
+         // extension in the filter list.
+         CommDlg_OpenSave_SetDefExt(mParentDlg, fn.GetExt().t_str());
+      }
+   }
 }
 
 void FileDialog::DoGetPosition( int *x, int *y ) const

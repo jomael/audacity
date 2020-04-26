@@ -11,22 +11,20 @@
 #ifndef __AUDACITY_EFFECT_STEREO_TO_MONO__
 #define __AUDACITY_EFFECT_STEREO_TO_MONO__
 
-#include <wx/string.h>
-
 #include "Effect.h"
-
-#define STEREOTOMONO_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Stereo To Mono") }
 
 class EffectStereoToMono final : public Effect
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectStereoToMono();
    virtual ~EffectStereoToMono();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
 
    // EffectDefinitionInterface implementation
 
@@ -41,20 +39,13 @@ public:
    // Effect implementation
 
    bool Process() override;
-   void End() override;
    bool IsHidden() override;
 
 private:
    // EffectStereoToMono implementation
 
-   bool ProcessOne(int count);
+   bool ProcessOne(sampleCount & curTime, sampleCount totalTime, WaveTrack *left, WaveTrack *right);
 
-private:
-   sampleCount mStart;
-   sampleCount mEnd;
-   WaveTrack *mLeftTrack;
-   WaveTrack *mRightTrack;
-   std::unique_ptr<WaveTrack> mOutTrack;
 };
 
 #endif

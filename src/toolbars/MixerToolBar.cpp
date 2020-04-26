@@ -14,7 +14,10 @@
 *//*******************************************************************/
 
 
-#include "../Audacity.h"
+#include "../Audacity.h" // for USE_* macros
+#include "MixerToolBar.h"
+
+#include "ToolManager.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
@@ -29,15 +32,12 @@
 #include <wx/tooltip.h>
 #endif
 
-#include "MixerToolBar.h"
-
 #include "../AColor.h"
 #include "../AllThemeResources.h"
 #include "../AudioIO.h"
 #include "../ImageManipulation.h"
+#include "../KeyboardCapture.h"
 #include "../Prefs.h"
-#include "../Project.h"
-#include "../Theme.h"
 #include "../widgets/ASlider.h"
 #include "../widgets/Grabber.h"
 
@@ -54,21 +54,34 @@ BEGIN_EVENT_TABLE(MixerToolBar, ToolBar)
    EVT_COMMAND(wxID_ANY, EVT_CAPTURE_KEY, MixerToolBar::OnCaptureKey)
 END_EVENT_TABLE()
 
-//Standard contructor
-MixerToolBar::MixerToolBar()
-: ToolBar(MixerBarID, _("Mixer"), wxT("Mixer"))
+//Standard constructor
+MixerToolBar::MixerToolBar( AudacityProject &project )
+: ToolBar(project, MixerBarID, XO("Mixer"), wxT("Mixer"), true)
 {
    mInputSliderVolume = 0.0;
    mOutputSliderVolume = 0.0;
+   mEnabled = true;
 }
 
 MixerToolBar::~MixerToolBar()
 {
 }
 
+MixerToolBar &MixerToolBar::Get( AudacityProject &project )
+{
+   auto &toolManager = ToolManager::Get( project );
+   return *static_cast<MixerToolBar*>( toolManager.GetToolBar(MixerBarID) );
+}
+
+const MixerToolBar &MixerToolBar::Get( const AudacityProject &project )
+{
+   return Get( const_cast<AudacityProject&>( project )) ;
+}
+
 void MixerToolBar::Create(wxWindow *parent)
 {
    ToolBar::Create(parent);
+   UpdatePrefs();
 }
 
 void MixerToolBar::Populate()
@@ -78,19 +91,21 @@ void MixerToolBar::Populate()
    Add(safenew AStaticBitmap(this,
                           wxID_ANY,
                           theTheme.Bitmap(bmpMic)), 0, wxALIGN_CENTER);
-   mInputSlider = safenew ASlider(this, wxID_ANY, _("Recording Volume"),
+   mInputSlider = safenew ASlider(this, wxID_ANY, XO("Recording Volume"),
                               wxDefaultPosition, wxSize(130, 25),
                               ASlider::Options{}.Line( 0.1f ).Page( 2.0f ));
-   Add(mInputSlider, 0, wxALIGN_CENTER);
+   Add(mInputSlider, 1, wxALIGN_CENTER);
+   mInputSlider->SetSizeHints(wxSize(75, 25), wxSize(1000, 25));
 
    // Playback icon and slider
    Add(safenew AStaticBitmap(this,
                           wxID_ANY,
                           theTheme.Bitmap(bmpSpeaker)), 0, wxALIGN_CENTER);
-   mOutputSlider = safenew ASlider(this, wxID_ANY, _("Playback Volume"),
+   mOutputSlider = safenew ASlider(this, wxID_ANY, XO("Playback Volume"),
                                wxDefaultPosition, wxSize(130, 25),
                                ASlider::Options{}.Line( 0.1f ).Page( 2.0f ));
-   Add(mOutputSlider, 0, wxALIGN_CENTER);
+   Add(mOutputSlider, 1, wxALIGN_CENTER);
+   mOutputSlider->SetSizeHints(wxSize(75, 25), wxSize(1000, 25));
 
    // this bit taken from SelectionBar::Populate()
    mInputSlider->Bind(wxEVT_SET_FOCUS,
@@ -106,27 +121,38 @@ void MixerToolBar::Populate()
                  &MixerToolBar::OnFocus,
                  this);
    // Show or hide the input slider based on whether it works
-   mInputSlider->Enable(gAudioIO->InputMixerWorks());
+   auto gAudioIO = AudioIO::Get();
+   mInputSlider->Enable(mEnabled && gAudioIO->InputMixerWorks());
+   mOutputSlider->Enable(mEnabled);
 
    UpdateControls();
 
    // Add a little space
    Add(2, -1);
+
+   // Listen for capture events
+   wxTheApp->Bind(EVT_AUDIOIO_CAPTURE,
+                  &MixerToolBar::OnAudioCapture,
+                  this);
+}
+
+void MixerToolBar::OnAudioCapture(wxCommandEvent & event)
+{
+   event.Skip();
+
+   AudacityProject *p = &mProject;
+   if ((AudacityProject *) event.GetEventObject() != p)
+   {
+      mEnabled = !event.GetInt();
+      mInputSlider->Enable(mEnabled);
+      mOutputSlider->Enable(mEnabled);
+   }
 }
 
 //Also from SelectionBar;
 void MixerToolBar::OnFocus(wxFocusEvent &event)
 {
-   if (event.GetEventType() == wxEVT_KILL_FOCUS) {
-      AudacityProject::ReleaseKeyboard(this);
-   }
-   else {
-      AudacityProject::CaptureKeyboard(this);
-   }
-
-   Refresh(false);
-
-   event.Skip();
+   KeyboardCapture::OnFocus( *this, event );
 }
 
 void MixerToolBar::OnCaptureKey(wxCommandEvent &event)
@@ -159,27 +185,38 @@ void MixerToolBar::UpdatePrefs()
    int inputSource;
 
    // Reset the selected source
+   auto gAudioIO = AudioIO::Get();
    gAudioIO->GetMixer(&inputSource, &inputVolume, &playbackVolume);
 
    // Show or hide the input slider based on whether it works
-   mInputSlider->Enable(gAudioIO->InputMixerWorks());
-
-   // Layout the toolbar
+   mInputSlider->Enable(mEnabled && gAudioIO->InputMixerWorks());
    Layout();
 
+// This code is from before the mixer toolbar was resizable.
+// Now that it is resizable we trust the user to resize the mixer toolbar themselves.
+#if 0
+   wxSize oldSize( GetSize() );
+   // Layout the toolbar
+   Layout();
    // Resize the toolbar to fit the contents
-   Fit();
-
+   //Fit();
    // And make that size the minimum
-   SetMinSize( wxWindow::GetSizer()->GetMinSize() );
-   SetSize( GetMinSize() );
-
-   // Notify someone that we've changed our size
-   Updated();
+   wxSize newMinSize( wxWindow::GetSizer()->GetMinSize() );
+   SetMinSize( newMinSize  );
+   // IF size must increase, do so.
+   if( newMinSize.x > oldSize.x ){
+      SetSize( newMinSize );
+      // Notify someone that we've changed our size
+      Updated();
+   }
+   // ELSE preserve original size.
+   else
+      SetSize( oldSize );
+#endif
 #endif
 
    // Set label to pull in language change
-   SetLabel(_("Mixer"));
+   SetLabel(XO("Mixer"));
 
    RegenerateTooltips();
 
@@ -195,7 +232,8 @@ void MixerToolBar::UpdateControls()
    int inputSource;
 
    // Show or hide the input slider based on whether it works
-   mInputSlider->Enable(gAudioIO->InputMixerWorks());
+   auto gAudioIO = AudioIO::Get();
+   mInputSlider->Enable(mEnabled && gAudioIO->InputMixerWorks());
 
    gAudioIO->GetMixer(&inputSource, &inputVolume, &playbackVolume);
 
@@ -221,6 +259,7 @@ void MixerToolBar::SetMixer(wxCommandEvent & WXUNUSED(event))
    float oldIn, oldOut;
    int inputSource;
 
+   auto gAudioIO = AudioIO::Get();
    gAudioIO->GetMixer(&inputSource, &oldIn, &oldOut);
    gAudioIO->SetMixer(inputSource, inputVolume, outputVolume);
    mOutputSliderVolume = outputVolume;
@@ -274,23 +313,33 @@ void MixerToolBar::AdjustInputGain(int adj)
 void MixerToolBar::SetToolTips()
 {
    if (mInputSlider->IsEnabled()) {
-      mInputSlider->SetToolTipTemplate(_("Recording Volume: %.2f"));
+      mInputSlider->SetToolTipTemplate(XO("Recording Volume: %.2f"));
    }
    else {
-      mInputSlider->SetToolTipTemplate(_("Recording Volume (Unavailable; use system mixer.)"));
+      mInputSlider->SetToolTipTemplate(XO("Recording Volume (Unavailable; use system mixer.)"));
    }
 
    if (mOutputSlider->IsEnabled()) {
-      wxString format;
-      if (gAudioIO->OutputMixerEmulated())
-         format = _("Playback Volume: %s (emulated)");
-      else
-         format = _("Playback Volume: %s");
+      auto format = (AudioIO::Get()->OutputMixerEmulated()
+         ? XO("Playback Volume: %.2f (emulated)")
+         : XO("Playback Volume: %.2f"));
 
-      mOutputSlider->SetToolTipTemplate(
-         wxString::Format( format, "%.2f" ) );
+      mOutputSlider->SetToolTipTemplate( format );
    }
    else {
-      mOutputSlider->SetToolTipTemplate(_("Playback Volume (Unavailable; use system mixer.)"));
+      mOutputSlider->SetToolTipTemplate(XO("Playback Volume (Unavailable; use system mixer.)"));
    }
+}
+
+static RegisteredToolbarFactory factory{ MixerBarID,
+   []( AudacityProject &project ){
+      return ToolBar::Holder{ safenew MixerToolBar{ project } }; }
+};
+
+namespace {
+AttachedToolBarMenuItem sAttachment{
+   /* i18n-hint: Clicking this menu item shows the toolbar
+      with the mixer */
+   MixerBarID, wxT("ShowMixerTB"), XXO("Mi&xer Toolbar")
+};
 }

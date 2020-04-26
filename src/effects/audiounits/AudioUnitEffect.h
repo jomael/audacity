@@ -10,13 +10,12 @@
 **********************************************************************/
 #ifndef AUDACITY_AUDIOUNIT_EFFECT_H
 
-#include "../../Audacity.h"
+#include "../../Audacity.h" // for USE_* macros
 
 #if USE_AUDIO_UNITS
 
 #include "../../MemoryX.h"
 #include <vector>
-#include <wx/dialog.h>
 
 #include <AudioToolbox/AudioUnitUtilities.h>
 #include <AudioUnit/AudioUnit.h>
@@ -29,12 +28,11 @@
 #include "AUControl.h"
 
 #define AUDIOUNITEFFECTS_VERSION wxT("1.0.0.0")
-/* 18n-hint: the name of an Apple audio software protocol */
-#define AUDIOUNITEFFECTS_FAMILY XO("AudioUnit")
-
+/* i18n-hint: the name of an Apple audio software protocol */
+#define AUDIOUNITEFFECTS_FAMILY EffectFamilySymbol{ wxT("AudioUnit"), XO("Audio Unit") }
 class AudioUnitEffect;
 
-using AudioUnitEffectArray = std::vector<movable_ptr<AudioUnitEffect>>;
+using AudioUnitEffectArray = std::vector<std::unique_ptr<AudioUnitEffect>>;
 
 class AudioUnitEffectExportDialog;
 class AudioUnitEffectImportDialog;
@@ -44,24 +42,24 @@ class AudioUnitEffect : public wxEvtHandler,
                         public EffectUIClientInterface
 {
 public:
-   AudioUnitEffect(const wxString & path,
+   AudioUnitEffect(const PluginPath & path,
                    const wxString & name,
                    AudioComponent component,
                    AudioUnitEffect *master = NULL);
    virtual ~AudioUnitEffect();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   wxString GetPath() override;
-   IdentInterfaceSymbol GetSymbol() override;
-   IdentInterfaceSymbol GetVendor() override;
+   PluginPath GetPath() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   VendorSymbol GetVendor() override;
    wxString GetVersion() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
-   // EffectIdentInterface implementation
+   // EffectComponentInterface implementation
 
    EffectType GetType() override;
-   IdentInterfaceSymbol GetFamilyId() override;
+   EffectFamilySymbol GetFamily() override;
    bool IsInteractive() override;
    bool IsDefault() override;
    bool IsLegacy() override;
@@ -80,6 +78,7 @@ public:
 
    void SetSampleRate(double rate) override;
    size_t SetBlockSize(size_t maxBlockSize) override;
+   size_t GetBlockSize() const override;
 
    sampleCount GetLatency() override;
    size_t GetTailSize() override;
@@ -101,22 +100,23 @@ public:
                                        size_t numSamples) override;
    bool RealtimeProcessEnd() override;
 
-   bool ShowInterface(wxWindow *parent, bool forceModal = false) override;
+   bool ShowInterface( wxWindow &parent,
+      const EffectDialogFactory &factory, bool forceModal = false) override;
 
    bool GetAutomationParameters(CommandParameters & parms) override;
    bool SetAutomationParameters(CommandParameters & parms) override;
 
-   bool LoadUserPreset(const wxString & name) override;
-   bool SaveUserPreset(const wxString & name) override;
+   bool LoadUserPreset(const RegistryPath & name) override;
+   bool SaveUserPreset(const RegistryPath & name) override;
 
    bool LoadFactoryPreset(int id) override;
    bool LoadFactoryDefaults() override;
-   wxArrayString GetFactoryPresets() override;
+   RegistryPaths GetFactoryPresets() override;
 
    // EffectUIClientInterface implementation
 
    void SetHostUI(EffectUIHostInterface *host) override;
-   bool PopulateUI(wxWindow *parent) override;
+   bool PopulateUI(ShuttleGui &S) override;
    bool IsGraphicalUI() override;
    bool ValidateUI() override;
    bool HideUI() override;
@@ -135,6 +135,9 @@ private:
    bool SetRateAndChannels();
 
    bool CopyParameters(AudioUnit srcUnit, AudioUnit dstUnit);
+   wxString Export(const wxString & path);
+   wxString Import(const wxString & path);
+   void Notify(AudioUnit unit, AudioUnitParameterID parm);
 
    // Realtime
    unsigned GetChannelCount();
@@ -162,15 +165,16 @@ private:
 
    void GetChannelCounts();
 
-   bool LoadParameters(const wxString & group);
-   bool SaveParameters(const wxString & group);
+   bool LoadPreset(const RegistryPath & group);
+   bool SavePreset(const RegistryPath & group);
 
-
+#if defined(HAVE_AUDIOUNIT_BASIC_SUPPORT)
    bool CreatePlain(wxWindow *parent);
+#endif
 
 private:
 
-   wxString mPath;
+   PluginPath mPath;
    wxString mName;
    wxString mVendor;
    AudioComponent mComponent;
@@ -200,7 +204,7 @@ private:
    EffectUIHostInterface *mUIHost;
    wxWindow *mParent;
    wxDialog *mDialog;
-   wxString mUIType;
+   wxString mUIType; // NOT translated, "Full", "Generic", or "Basic"
    bool mIsGraphical;
 
    AudioUnitEffect *mMaster;     // non-NULL if a slave
@@ -229,38 +233,39 @@ public:
    AudioUnitEffectsModule(ModuleManagerInterface *moduleManager, const wxString *path);
    virtual ~AudioUnitEffectsModule();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   wxString GetPath() override;
-   IdentInterfaceSymbol GetSymbol() override;
-   IdentInterfaceSymbol GetVendor() override;
+   PluginPath GetPath() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   VendorSymbol GetVendor() override;
    wxString GetVersion() override;
-   wxString GetDescription() override;
+   TranslatableString GetDescription() override;
 
    // ModuleInterface implementation
 
    bool Initialize() override;
    void Terminate() override;
+   EffectFamilySymbol GetOptionalFamilySymbol() override;
 
-   wxArrayString FileExtensions() override;
-   wxString InstallPath() override { return {}; }
+   const FileExtensions &GetFileExtensions() override;
+   FilePath InstallPath() override { return {}; }
 
    bool AutoRegisterPlugins(PluginManagerInterface & pm) override;
-   wxArrayString FindPluginPaths(PluginManagerInterface & pm) override;
+   PluginPaths FindPluginPaths(PluginManagerInterface & pm) override;
    unsigned DiscoverPluginsAtPath(
-      const wxString & path, wxString &errMsg,
+      const PluginPath & path, TranslatableString &errMsg,
       const RegistrationCallback &callback)
          override;
 
-   bool IsPluginValid(const wxString & path, bool bFast) override;
+   bool IsPluginValid(const PluginPath & path, bool bFast) override;
 
-   IdentInterface *CreateInstance(const wxString & path) override;
-   void DeleteInstance(IdentInterface *instance) override;
+   ComponentInterface *CreateInstance(const PluginPath & path) override;
+   void DeleteInstance(ComponentInterface *instance) override;
 
    // AudioUnitEffectModule implementation
 
-   void LoadAudioUnitsOfType(OSType inAUType, wxArrayString & effects);
-   AudioComponent FindAudioUnit(const wxString & path, wxString & name);
+   void LoadAudioUnitsOfType(OSType inAUType, PluginPaths & effects);
+   AudioComponent FindAudioUnit(const PluginPath & path, wxString & name);
 
    wxString FromOSType(OSType type);
    OSType ToOSType(const wxString & type);

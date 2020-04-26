@@ -40,19 +40,19 @@
 */
 
 #include "Audacity.h"
+#include "FFT.h"
+
 #include "Internat.h"
 
-#include "FFT.h"
-#include "MemoryX.h"
 #include "SampleFormat.h"
 
+#include <wx/wxcrtvararg.h>
 #include <wx/intl.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
 
 #include "RealFFTf.h"
-#include "Experimental.h"
 
 static ArraysOf<int> gFFTBitTable;
 static const size_t MaxFastBits = 16;
@@ -332,30 +332,39 @@ int NumWindowFuncs()
    return eWinFuncCount;
 }
 
-const wxChar *WindowFuncName(int whichFunction)
+const TranslatableString WindowFuncName(int whichFunction)
 {
    switch (whichFunction) {
    default:
    case eWinFuncRectangular:
-      return _("Rectangular");
+      return XO("Rectangular");
    case eWinFuncBartlett:
-      return wxT("Bartlett");
+      /* i18n-hint a proper name */
+      return XO("Bartlett");
    case eWinFuncHamming:
-      return wxT("Hamming");
+      /* i18n-hint a proper name */
+      return XO("Hamming");
    case eWinFuncHanning:
-      return wxT("Hanning");
+      /* i18n-hint a proper name */
+      return XO("Hann");
    case eWinFuncBlackman:
-      return wxT("Blackman");
+      /* i18n-hint a proper name */
+      return XO("Blackman");
    case eWinFuncBlackmanHarris:
-      return wxT("Blackman-Harris");
+      /* i18n-hint two proper names */
+      return XO("Blackman-Harris");
    case eWinFuncWelch:
-      return wxT("Welch");
+      /* i18n-hint a proper name */
+      return XO("Welch");
    case eWinFuncGaussian25:
-      return wxT("Gaussian(a=2.5)");
+      /* i18n-hint a mathematical function named for C. F. Gauss */
+      return XO("Gaussian(a=2.5)");
    case eWinFuncGaussian35:
-      return wxT("Gaussian(a=3.5)");
+      /* i18n-hint a mathematical function named for C. F. Gauss */
+      return XO("Gaussian(a=3.5)");
    case eWinFuncGaussian45:
-      return wxT("Gaussian(a=4.5)");
+      /* i18n-hint a mathematical function named for C. F. Gauss */
+      return XO("Gaussian(a=4.5)");
    }
 }
 
@@ -404,7 +413,7 @@ void NewWindowFunc(int whichFunction, size_t NumSamplesIn, bool extraSample, flo
       break;
    case eWinFuncHanning:
    {
-      // Hanning
+      // Hann
       const double multiplier = 2 * M_PI / NumSamples;
       static const double coeff0 = 0.5, coeff1 = -0.5;
       for (int ii = 0; ii < NumSamples; ++ii)
@@ -585,6 +594,8 @@ void DerivativeOfWindowFunc(int whichFunction, size_t NumSamples, bool extraSamp
       // There are deltas at the ends
       const double multiplier = 2 * M_PI / NumSamples;
       static const double coeff0 = 0.54, coeff1 = -0.46 * multiplier;
+      // TODO This code should be more explicit about the precision it intends.
+      // For now we get C4305 warnings, truncation from 'const double' to 'float' 
       in[0] *= coeff0;
       if (!extraSample)
          --NumSamples;
@@ -599,7 +610,7 @@ void DerivativeOfWindowFunc(int whichFunction, size_t NumSamples, bool extraSamp
       break;
    case eWinFuncHanning:
    {
-      // Hanning
+      // Hann
       const double multiplier = 2 * M_PI / NumSamples;
       const double coeff1 = -0.5 * multiplier;
       for (int ii = 0; ii < (int)NumSamples; ++ii)

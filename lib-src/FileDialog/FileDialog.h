@@ -17,9 +17,7 @@ custom controls.
 #ifndef _FILEDIALOG_H_
 #define _FILEDIALOG_H_
 
-#include <wx/defs.h>
-#include <wx/filectrl.h>
-#include <wx/filedlg.h>
+#include <wx/filedlg.h> // to inherit
 
 #ifndef AUDACITY_DLL_API
 #define AUDACITY_DLL_API
@@ -37,6 +35,8 @@ public:
 
    virtual bool HasUserPaneCreator() const;
    virtual void SetUserPaneCreator(UserPaneCreatorFunction creator, wxUIntPtr userdata);
+
+   virtual void SetFileExtension(const wxString& extension) {};
 
 protected:
    void CreateUserPane(wxWindow *parent);

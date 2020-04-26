@@ -11,6 +11,7 @@
 
 **********************************************************************/
 
+#include "../Audacity.h" // for USE_* macros
 #if USE_SOUNDTOUCH
 
 #ifndef __AUDACITY_EFFECT_CHANGETEMPO__
@@ -18,30 +19,27 @@
 
 #if USE_SBSMS
 #include "SBSMSEffect.h"
-#include <wx/checkbox.h>
 #endif
-
-#include <wx/event.h>
-#include <wx/slider.h>
-#include <wx/string.h>
-#include <wx/textctrl.h>
 
 #include "SoundTouchEffect.h"
 
+class wxSlider;
+class wxCheckBox;
+class wxTextCtrl;
 class ShuttleGui;
-
-#define CHANGETEMPO_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Change Tempo") }
 
 class EffectChangeTempo final : public EffectSoundTouch
 {
 public:
+   static const ComponentInterfaceSymbol Symbol;
+
    EffectChangeTempo();
    virtual ~EffectChangeTempo();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
-   wxString GetDescription() override;
+   ComponentInterfaceSymbol GetSymbol() override;
+   TranslatableString GetDescription() override;
    wxString ManualPage() override;
 
    // EffectDefinitionInterface implementation
